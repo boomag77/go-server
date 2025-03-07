@@ -6,12 +6,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"sync"
+
 )
 
 var (
 	logFile *os.File
-	logMutex sync.Mutex
+	logChan chan string
+	wg	sync.WaitGroup
 )
 
 func initLogger() {
@@ -25,6 +28,25 @@ func initLogger() {
 	}
 
 	log.SetOutput(logFile)
+
+	logChan = make(chan string, 100)
+
+	numWorkers := runtime.NumCPU()
+	for i := 1; i <= numWorkers; i++ {
+		wg.Add(1)
+		go logWorker()
+	}
+}
+
+func logWorker() {
+	defer wg.Done()
+	for {
+		logString, ok := <- logChan
+		if !ok {
+			return
+		}
+		log.Println(logString)
+	}
 }
 
 // GET Handler /ping (server check)
@@ -33,12 +55,12 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logEvent(logString string) {
+	select {
+	case logChan <- logString:
 
-	logMutex.Lock()
-	defer logMutex.Unlock()
-	
-
-	log.Println(logString)
+	default:
+		log.Println("WARNING: log channel is full, dropping log!")
+	}
 }
 
 
@@ -66,7 +88,11 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	initLogger()
+
 	defer logFile.Close()
+	defer wg.Wait()
+	defer close(logChan)
+
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/message", messageHandler)
 
