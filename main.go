@@ -6,7 +6,26 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 )
+
+var (
+	logFile *os.File
+	logMutex sync.Mutex
+)
+
+func initLogger() {
+	
+	const logFileName string = "server.log"
+	var err error
+
+	logFile, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.SetOutput(logFile)
+}
 
 // GET Handler /ping (server check)
 func pingHandler(w http.ResponseWriter, r *http.Request) {
@@ -14,14 +33,11 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logEvent(logString string) {
-	const logFileName string = "server.log"
-	file, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
 
-	log.SetOutput(file)
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	
+
 	log.Println(logString)
 }
 
@@ -49,6 +65,8 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	initLogger()
+	defer logFile.Close()
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/message", messageHandler)
 
