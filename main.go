@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,13 +10,42 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ssm"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+type SendMessageRequest struct {
+	ChatID int64 `json:"chat_idi"`
+	Text string  `json:"text"`
+}
 
 var (
 	logFile *os.File
 	logChan chan string
 	wg	sync.WaitGroup
 )
+
+func getBotToken() string {
+
+	sess := session.Must(session.NewSession())
+	ssmsvc := ssm.New(sess)
+
+	param, err := ssmsvc.GetParameter((&ssm.GetParameterInput{
+		Name: 		aws.String("/kiddokey-bot/BOT_TOKEN"),
+		WithDecryption: aws.Bool(true),
+	}))
+	
+	if err != nil {
+
+		logString := fmt.Sprintf("Error while getting token from AWS Parameter Store: %s", err)
+		logEvent(logString)
+		return ""	
+	}
+
+	return *param.Parameter.Value
+}
 
 func initLogger() {
 	
@@ -86,6 +116,63 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
 }
 
+
+// sendin message to BOT_TOKEN
+func sendMessage(chatID int64, text string) {
+
+	botToken := getBotToken()
+	if botToken == "" {
+
+		logString := fmt.Sprintf("Error: Empty token!")
+		logEvent(logString)
+		return
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+
+	data := SendMessageRequest{
+		ChatID: chatID,
+		Text: text,
+	}
+
+	body, _ := json.Marshal(data)
+	response, err := http.Post(url, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+
+		logString := fmt.Sprintf("Error while sending response message: %s", err)
+		logEvent(logString)
+		return
+	}
+	defer response.Body.Close()
+
+	logString := fmt.Sprintf("Message sent!")
+	logEvent(logString)
+
+}
+
+// webhook Handler
+func webHookHandler(w http.ResponseWriter, r *http.Request) {
+	
+	var update tgbotapi.Update
+
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+
+		logString := fmt.Sprintf("Error while decoding webhook update: %s", err)
+		logEvent(logString)
+		http.Error(w, "Error while decoding", http.StatusBadRequest)
+		return
+	}
+	if update.Message != nil {
+		userName := update.Message.From.UserName
+		messageText := update.Message.Text
+
+		responseText := fmt.Sprintf("Hi, %s! You wrote: \"%s\"", userName, messageText)
+		sendMessage(update.Message.Chat.ID, responseText)
+
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func main() {
 	initLogger()
 
@@ -95,6 +182,7 @@ func main() {
 
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/message", messageHandler)
+	http.HandleFunc("/webhook", webHookHandler)
 
 	log.Println("Starting server on port 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
