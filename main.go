@@ -17,7 +17,7 @@ import (
 )
 
 type SendMessageRequest struct {
-	ChatID int64 `json:"chat_idi"`
+	ChatID int64 `json:"chat_id"`
 	Text string  `json:"text"`
 }
 
@@ -179,7 +179,7 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 		userName := update.Message.From.UserName
 		messageText := update.Message.Text
 
-		logString := fmt Sprintf("Received message from: %s, text: %s", userName, messageText)
+		logString := fmt.Sprintf("Received message from: %s, text: %s", userName, messageText)
 		logEvent(logString)
 
 		responseText := fmt.Sprintf("Hi, %s! You wrote: \"%s\"", userName, messageText)
