@@ -38,7 +38,7 @@ func getBotToken() string {
 
 	if err != nil {
 
-		logString := fmt.Sprint("Error when trying to create AWS-session: %v", err)
+		logString := fmt.Sprintf("Error when trying to create AWS-session: %s", err)
 		logEvent(logString)
 		return ""
 	}
@@ -178,6 +178,9 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil {
 		userName := update.Message.From.UserName
 		messageText := update.Message.Text
+
+		logString := fmt Sprintf("Received message from: %s, text: %s", userName, messageText)
+		logEvent(logString)
 
 		responseText := fmt.Sprintf("Hi, %s! You wrote: \"%s\"", userName, messageText)
 		sendMessage(update.Message.Chat.ID, responseText)
