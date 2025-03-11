@@ -27,9 +27,23 @@ var (
 	wg	sync.WaitGroup
 )
 
-func getBotToken() string {
 
-	sess := session.Must(session.NewSession())
+func getBotToken() string {
+	
+	awsRegion := "us-east-2"
+
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion),
+	})
+
+	if err != nil {
+
+		logString := fmt.Sprint("Error when trying to create AWS-session: %v", err)
+		logEvent(logString)
+		return ""
+	}
+
+
 	ssmsvc := ssm.New(sess)
 
 	param, err := ssmsvc.GetParameter((&ssm.GetParameterInput{
