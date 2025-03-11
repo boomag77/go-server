@@ -17,19 +17,18 @@ import (
 )
 
 type SendMessageRequest struct {
-	ChatID int64 `json:"chat_id"`
-	Text string  `json:"text"`
+	ChatID int64  `json:"chat_id"`
+	Text   string `json:"text"`
 }
 
 var (
 	logFile *os.File
 	logChan chan string
-	wg	sync.WaitGroup
+	wg      sync.WaitGroup
 )
 
-
 func getBotToken() string {
-	
+
 	awsRegion := "us-east-2"
 
 	sess, err := session.NewSession(&aws.Config{
@@ -43,26 +42,25 @@ func getBotToken() string {
 		return ""
 	}
 
-
 	ssmsvc := ssm.New(sess)
 
 	param, err := ssmsvc.GetParameter((&ssm.GetParameterInput{
-		Name: 		aws.String("/kiddokey-bot/BOT_TOKEN"),
+		Name:           aws.String("/kiddokey-bot/BOT_TOKEN"),
 		WithDecryption: aws.Bool(true),
 	}))
-	
+
 	if err != nil {
 
 		logString := fmt.Sprintf("Error while getting token from AWS Parameter Store: %s", err)
 		logEvent(logString)
-		return ""	
+		return ""
 	}
 
 	return *param.Parameter.Value
 }
 
 func initLogger() {
-	
+
 	const logFileName string = "server.log"
 	var err error
 
@@ -85,7 +83,7 @@ func initLogger() {
 func logWorker() {
 	defer wg.Done()
 	for {
-		logString, ok := <- logChan
+		logString, ok := <-logChan
 		if !ok {
 			return
 		}
@@ -95,7 +93,7 @@ func logWorker() {
 
 // GET Handler /ping (server check)
 func pingHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w,`{"message": "pong"}`)
+	fmt.Fprintf(w, `{"message": "pong"}`)
 }
 
 func logEvent(logString string) {
@@ -107,12 +105,11 @@ func logEvent(logString string) {
 	}
 }
 
-
 // POST Handler /message (receive JSON-message)
 func messageHandler(w http.ResponseWriter, r *http.Request) {
 	var msg struct {
 		Username string `json:"username"`
-		Text string `json:"text"`
+		Text     string `json:"text"`
 	}
 
 	// Decode JSON-request to struct
@@ -130,7 +127,6 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
 }
 
-
 // sendin message to BOT_TOKEN
 func sendMessage(chatID int64, text string) {
 
@@ -145,7 +141,7 @@ func sendMessage(chatID int64, text string) {
 
 	data := SendMessageRequest{
 		ChatID: chatID,
-		Text: text,
+		Text:   text,
 	}
 
 	body, _ := json.Marshal(data)
@@ -165,7 +161,7 @@ func sendMessage(chatID int64, text string) {
 
 // webhook Handler
 func webHookHandler(w http.ResponseWriter, r *http.Request) {
-	
+
 	var update tgbotapi.Update
 
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
