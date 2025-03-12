@@ -32,31 +32,24 @@ var (
 )
 
 func getBotToken() string {
-
 	awsRegion := "us-east-2"
 
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(awsRegion),
 	})
-
 	if err != nil {
-
-		logString := "Error when trying to create AWS-session: " + err.Error()
-		logEvent(logString)
+		logEvent("Error when trying to create AWS-session: " + err.Error())
 		return ""
 	}
 
 	ssmsvc := ssm.New(sess)
-
-	param, err := ssmsvc.GetParameter((&ssm.GetParameterInput{
+	param, err := ssmsvc.GetParameter(&ssm.GetParameterInput{
 		Name:           aws.String("/kiddokey-bot/BOT_TOKEN"),
 		WithDecryption: aws.Bool(true),
-	}))
-
+	})
 	if err != nil {
 
-		logString := "Error while getting token from AWS Parameter Store: " + err.Error()
-		logEvent(logString)
+		logEvent("Error while getting token from AWS Parameter Store: " + err.Error())
 		return ""
 	}
 
@@ -132,40 +125,32 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 
 // sendin message to BOT_TOKEN
 func sendMessage(chatID int64, text string) {
-
 	botToken := getBotToken()
 	if botToken == "" {
-		logString := "Error: Empty token!"
-		logEvent(logString)
+		logEvent("Error: Empty token!")
 		return
 	}
 
 	url := "https://api.telegram.org/bot" + botToken + "/sendMessage"
-
 	data := SendMessageRequest{
 		ChatID: chatID,
 		Text:   text,
 	}
 
-	// Marshal the data to JSON
 	body, err := json.Marshal(data)
 	if err != nil {
-		logString := "Error while marshaling JSON: " + err.Error()
-		logEvent(logString)
+		logEvent("Error while marshaling JSON: " + err.Error())
 		return
 	}
 
-	// Send the POST request to the Telegram API
 	response, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
-		logString := "Error while sending response message:" + err.Error()
-		logEvent(logString)
+		logEvent("Error while sending response message: " + err.Error())
 		return
 	}
 	defer response.Body.Close()
 
-	logString := "Message sent!"
-	logEvent(logString)
+	logEvent("Message sent!")
 }
 
 // webhook Handler
@@ -197,27 +182,20 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 
 // shutdown server
 func shutdownServer(server *http.Server) {
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	signal := <-sigChan
-	logString := "Received signal: " + signal.String()
-	logEvent(logString)
+	sig := <-sigChan
+	logEvent("Received signal: " + sig.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-
-		logString := "Error while shutting down server: " + err.Error()
-		logEvent(logString)
+		logEvent("Error while shutting down server: " + err.Error())
 	}
 
-	logString = "Server is down!"
-	logEvent(logString)
-
+	logEvent("Server is down!")
 	os.Exit(0)
 }
 
