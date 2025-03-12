@@ -57,7 +57,6 @@ func getBotToken() string {
 }
 
 func initLogger() {
-
 	const logFileName string = "server.log"
 	var err error
 
@@ -223,8 +222,11 @@ func startServer() *http.Server {
 
 func main() {
 	initLogger()
-
-	defer logFile.Close()
+	defer func() {
+		if logFile != nil {
+			logFile.Close()
+		}
+	}()
 	defer wg.Wait()
 	defer close(logChan)
 
