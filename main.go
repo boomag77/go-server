@@ -195,7 +195,6 @@ func shutdownServer(server *http.Server) {
 	}
 
 	logEvent("Server is down!")
-	os.Exit(0)
 }
 
 // start server
