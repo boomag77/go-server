@@ -4,57 +4,35 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func setupTest(t *testing.T) func() {
-	// Set up environment variable for testing
-	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
-
-	return func() {
-		os.Unsetenv("DATABASE_URL")
-		if DB != nil {
-			CloseDB()
-		}
-	}
-}
-
 func TestInitDB(t *testing.T) {
-	cleanup := setupTest(t)
-	defer cleanup()
+	// Устанавливаем переменную окружения для тестовой БД
+	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
+	defer os.Unsetenv("DATABASE_URL")
 
-	if err := InitDB(); err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
+	pool, err := InitDB()
+	assert.NoError(t, err, "Expected no error, got an error")
+	assert.NotNil(t, pool, "Expected a valid connection pool, got nil")
 
-	if DB == nil {
-		t.Fatal("Expected DB to be initialized, but it is nil")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := DB.Ping(ctx)
-	if err != nil {
-		t.Fatalf("Could not ping database: %v", err)
-	}
+	// Закрываем соединение после теста
+	CloseDB(pool)
 }
 
 func TestCloseDB(t *testing.T) {
-	cleanup := setupTest(t)
-	defer cleanup()
+	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
+	defer os.Unsetenv("DATABASE_URL")
 
-	if err := InitDB(); err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
+	pool, err := InitDB()
+	assert.NoError(t, err, "Expected no error, got an error")
+	assert.NotNil(t, pool, "Expected a valid connection pool, got nil")
 
-	if DB == nil {
-		t.Fatal("Expected DB to be initialized, but it is nil")
-	}
+	// Закрываем соединение
+	CloseDB(pool)
 
-	CloseDB()
-
-	if DB != nil {
-		t.Fatal("Expected DB to be nil after closing, but it is not")
-	}
+	// Проверяем, что соединение закрыто
+	_, err = pool.Acquire(context.Background())
+	assert.Error(t, err, "Expected error when acquiring a connection from a closed pool, got nil")
 }

@@ -5,32 +5,34 @@ import (
 	"log"
 	"os"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var DB *pgx.Conn
-
-func InitDB() error {
+func InitDB() (*pgxpool.Pool, error) {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
 		connStr = "postgres://postgres:postgres@localhost:5432/botdb"
 	}
 
-	conn, err := pgx.Connect(context.Background(), connStr)
+	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
-		return err
+		log.Printf("Unable to parse database URL: %v\n", err)
+		return nil, err
 	}
 
-	DB = conn
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		log.Printf("Unable to create connection pool: %v\n", err)
+		return nil, err
+	}
+
 	log.Println("Connected to database")
-	return nil
+	return pool, nil
 }
 
-func CloseDB() {
-	if DB != nil {
-		DB.Close(context.Background())
-		DB = nil
-		log.Println("Database connection closed")
+func CloseDB(pool *pgxpool.Pool) {
+	if pool != nil {
+		pool.Close()
+		log.Println("Database connection pool closed")
 	}
 }
