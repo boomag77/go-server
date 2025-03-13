@@ -21,7 +21,6 @@ require (
 )
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
