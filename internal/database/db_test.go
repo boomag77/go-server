@@ -1,54 +1,52 @@
 package database
 
 import (
-	"database/sql"
+	"context"
 	"os"
 	"testing"
-
-	_ "github.com/lib/pq"
+	"time"
 )
 
-// Mock DB variable
-var DB *sql.DB
+func setupTest(t *testing.T) func() {
+	// Set up environment variable for testing
+	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
 
-// Mock InitDB function
-func InitDB() {
-	var err error
-	DB, err = sql.Open("postgres", os.Getenv("DATABASE_URL"))
-	if err != nil {
-		panic(err)
-	}
-}
-
-// Mock CloseDB function
-func CloseDB() {
-	if DB != nil {
-		DB.Close()
-		DB = nil
+	return func() {
+		os.Unsetenv("DATABASE_URL")
+		if DB != nil {
+			CloseDB()
+		}
 	}
 }
 
 func TestInitDB(t *testing.T) {
-	// Set up environment variable for testing
-	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
-	defer os.Unsetenv("DATABASE_URL")
+	cleanup := setupTest(t)
+	defer cleanup()
 
-	InitDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
 
 	if DB == nil {
 		t.Fatal("Expected DB to be initialized, but it is nil")
 	}
 
-	// Clean up
-	CloseDB()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := DB.Ping(ctx)
+	if err != nil {
+		t.Fatalf("Could not ping database: %v", err)
+	}
 }
 
 func TestCloseDB(t *testing.T) {
-	// Set up environment variable for testing
-	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
-	defer os.Unsetenv("DATABASE_URL")
+	cleanup := setupTest(t)
+	defer cleanup()
 
-	InitDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
 
 	if DB == nil {
 		t.Fatal("Expected DB to be initialized, but it is nil")
