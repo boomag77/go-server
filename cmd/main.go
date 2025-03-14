@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"telegram_server/config"
+	"telegram_server/internal/database"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -57,10 +59,10 @@ func getBotToken() string {
 }
 
 func initLogger() {
-	const logFileName string = "server.log"
 	var err error
 
-	logFile, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Assign to the global variable instead of shadowing it.
+	logFile, err = os.OpenFile(config.LogFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -220,6 +222,8 @@ func startServer() *http.Server {
 }
 
 func main() {
+	config.Init()
+
 	initLogger()
 	defer func() {
 		if logFile != nil {
@@ -228,6 +232,13 @@ func main() {
 	}()
 	defer wg.Wait()
 	defer close(logChan)
+
+	dbPool, err := database.InitDB()
+	if err != nil {
+		logEvent("Error while initializing database: " + err.Error())
+		return
+	}
+	defer database.CloseDB(dbPool)
 
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/message", messageHandler)
