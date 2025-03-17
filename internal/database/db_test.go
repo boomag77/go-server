@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -30,9 +31,25 @@ func TestCloseDB(t *testing.T) {
 	assert.NotNil(t, pool, "Expected a valid connection pool, got nil")
 
 	// Закрываем соединение
+	// Закрываем соединение
 	CloseDB(pool)
-
-	// Проверяем, что соединение закрыто
-	_, err = pool.Acquire(context.Background())
-	assert.Error(t, err, "Expected error when acquiring a connection from a closed pool, got nil")
+	// Instead of fixed sleep, wait until pool is closed (max 500ms)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	var acquireErr error
+	for {
+		select {
+		case <-ctx.Done():
+			// Timeout reached; assert that we did eventually get an error.
+			assert.Error(t, acquireErr, "Expected error when acquiring a connection from a closed pool, got nil")
+			return
+		default:
+			_, acquireErr = pool.Acquire(context.Background())
+			if acquireErr != nil {
+				assert.Error(t, acquireErr, "Expected error when acquiring a connection from a closed pool")
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 }

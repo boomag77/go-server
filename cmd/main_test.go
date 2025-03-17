@@ -71,3 +71,14 @@ func TestGetBotToken(t *testing.T) {
 		t.Errorf("getBotToken returned unexpected token: got %v want %v", token, expected)
 	}
 }
+
+func TestSendMessage(t *testing.T) {
+	// Ensure sendMessage does not panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("sendMessage panicked: %v", r)
+		}
+	}()
+	sendMessage(12345, "Hello, Test")
+	// Optionally, add assertions if sendMessage modifies state or makes an HTTP call.
+}

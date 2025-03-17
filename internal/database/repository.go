@@ -2,7 +2,8 @@ package database
 
 import (
 	"context"
-	"log"
+	"strconv"
+	"telegram_server/internal/logger"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -10,17 +11,17 @@ import (
 func SaveMessage(ctx context.Context, db *pgxpool.Pool, username, text string) error {
 	_, err := db.Exec(ctx, "INSERT INTO messages (username, text) VALUES ($1, $2)", username, text)
 	if err != nil {
-		log.Printf("Error while saving message: %v", err)
+		logger.LogEvent("Error while saving message: " + err.Error())
 		return err
 	}
-	log.Println("Message saved successfully")
+	logger.LogEvent("Message saved successfully")
 	return nil
 }
 
 func GetMessages(ctx context.Context, db *pgxpool.Pool) ([]Message, error) {
 	rows, err := db.Query(ctx, "SELECT id, username, text FROM messages")
 	if err != nil {
-		log.Printf("Error while getting messages: %v", err)
+		logger.LogEvent("Error while getting messages: " + err.Error())
 		return nil, err
 	}
 	defer rows.Close()
@@ -29,16 +30,15 @@ func GetMessages(ctx context.Context, db *pgxpool.Pool) ([]Message, error) {
 	for rows.Next() {
 		var message Message
 		if err := rows.Scan(&message.ID, &message.UserName, &message.Text); err != nil {
-			log.Printf("Error while scanning message: %v", err)
+			logger.LogEvent("Error while scanning message: " + err.Error())
 			return nil, err
 		}
 		messages = append(messages, message)
 	}
 	if err = rows.Err(); err != nil {
-		log.Printf("Error after scanning rows: %v", err)
+		logger.LogEvent("Error after scanning rows: " + err.Error())
 		return nil, err
 	}
-
-	log.Printf("Retrieved %d messages", len(messages))
+	logger.LogEvent("Retrieved " + strconv.Itoa(len(messages)) + " messages ")
 	return messages, nil
 }

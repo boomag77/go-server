@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
+	//"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
-	"sync"
+
+	// "runtime"
+	// "sync"
 	"syscall"
 	"telegram_server/config"
 	"telegram_server/internal/database"
+	"telegram_server/internal/logger"
+
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -27,12 +31,6 @@ type SendMessageRequest struct {
 	Text   string `json:"text"`
 }
 
-var (
-	logFile *os.File
-	logChan chan string
-	wg      sync.WaitGroup
-)
-
 func getBotToken() string {
 	awsRegion := "us-east-2"
 
@@ -40,7 +38,7 @@ func getBotToken() string {
 		Region: aws.String(awsRegion),
 	})
 	if err != nil {
-		logEvent("Error when trying to create AWS-session: " + err.Error())
+		logger.LogEvent("Error when trying to create AWS-session: " + err.Error())
 		return ""
 	}
 
@@ -51,56 +49,16 @@ func getBotToken() string {
 	})
 	if err != nil {
 
-		logEvent("Error while getting token from AWS Parameter Store: " + err.Error())
+		logger.LogEvent("Error while getting token from AWS Parameter Store: " + err.Error())
 		return ""
 	}
 
 	return *param.Parameter.Value
 }
 
-func initLogger() {
-	var err error
-
-	// Assign to the global variable instead of shadowing it.
-	logFile, err = os.OpenFile(config.LogFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.SetOutput(logFile)
-
-	logChan = make(chan string, 100)
-
-	numWorkers := runtime.NumCPU()
-	for i := 1; i <= numWorkers; i++ {
-		wg.Add(1)
-		go logWorker()
-	}
-}
-
-func logWorker() {
-	defer wg.Done()
-	for {
-		logString, ok := <-logChan
-		if !ok {
-			return
-		}
-		log.Println(logString)
-	}
-}
-
 // GET Handler /ping (server check)
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"message": "pong"}`)
-}
-
-func logEvent(logString string) {
-	select {
-	case logChan <- logString:
-
-	default:
-		log.Println("WARNING: log channel is full, dropping log!")
-	}
 }
 
 // POST Handler /message (receive JSON-message)
@@ -118,7 +76,7 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Logging user message to console
 	logString := "Received message from: " + msg.Username + ", text: " + msg.Text
-	logEvent(logString)
+	logger.LogEvent(logString)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
@@ -128,7 +86,7 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 func sendMessage(chatID int64, text string) {
 	botToken := getBotToken()
 	if botToken == "" {
-		logEvent("Error: Empty token!")
+		logger.LogEvent("Error: Empty token!")
 		return
 	}
 
@@ -140,18 +98,18 @@ func sendMessage(chatID int64, text string) {
 
 	body, err := json.Marshal(data)
 	if err != nil {
-		logEvent("Error while marshaling JSON: " + err.Error())
+		logger.LogEvent("Error while marshaling JSON: " + err.Error())
 		return
 	}
 
 	response, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
-		logEvent("Error while sending response message: " + err.Error())
+		logger.LogEvent("Error while sending response message: " + err.Error())
 		return
 	}
 	defer response.Body.Close()
 
-	logEvent("Message sent!")
+	logger.LogEvent("Message sent! " + response.Status + " " + fmt.Sprint(response.StatusCode))
 }
 
 // webhook Handler
@@ -162,7 +120,7 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 
 		logString := "Error while decoding webhook update: " + err.Error()
-		logEvent(logString)
+		logger.LogEvent(logString)
 		http.Error(w, "Error while decoding", http.StatusBadRequest)
 		return
 	}
@@ -171,7 +129,7 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 		messageText := update.Message.Text
 
 		logString := "Received message from: " + userName + ", text: " + messageText
-		logEvent(logString)
+		logger.LogEvent(logString)
 
 		responseText := "Hi, " + userName + "! You wrote: " + messageText
 		sendMessage(update.Message.Chat.ID, responseText)
@@ -187,16 +145,16 @@ func shutdownServer(server *http.Server) {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	sig := <-sigChan
-	logEvent("Received signal: " + sig.String())
+	logger.LogEvent("Received signal: " + sig.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		logEvent("Error while shutting down server: " + err.Error())
+		logger.LogEvent("Error while shutting down server: " + err.Error())
 	}
 
-	logEvent("Server is down!")
+	logger.LogEvent("Server is down!")
 }
 
 // start server
@@ -209,12 +167,12 @@ func startServer() *http.Server {
 	go func() {
 
 		logString := "Starting server on port 8080..."
-		logEvent(logString)
+		logger.LogEvent(logString)
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 
 			logString := "Error while starting server: " + err.Error()
-			logEvent(logString)
+			logger.LogEvent(logString)
 		}
 	}()
 
@@ -224,18 +182,12 @@ func startServer() *http.Server {
 func main() {
 	config.Init()
 
-	initLogger()
-	defer func() {
-		if logFile != nil {
-			logFile.Close()
-		}
-	}()
-	defer wg.Wait()
-	defer close(logChan)
+	logger.Init()
+	defer logger.Close()
 
 	dbPool, err := database.InitDB()
 	if err != nil {
-		logEvent("Error while initializing database: " + err.Error())
+		logger.LogEvent("Error while initializing database: " + err.Error())
 		return
 	}
 	defer database.CloseDB(dbPool)

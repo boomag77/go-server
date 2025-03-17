@@ -2,24 +2,29 @@ package database
 
 import (
 	"context"
-	"log"
+	"os"
 	"telegram_server/config"
+	"telegram_server/internal/logger"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func InitDB() (*pgxpool.Pool, error) {
-	connStr := config.DatabaseURL
+	// Use the environment variable if it exists, otherwise fall back to config.DatabaseURL.
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = config.DatabaseURL
+	}
 
-	config, err := pgxpool.ParseConfig(connStr)
+	configPool, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
-		log.Printf("Unable to parse database URL: %v\n", err)
+		logger.LogEvent("Unable to parse database URL: " + err.Error())
 		return nil, err
 	}
 
-	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	pool, err := pgxpool.NewWithConfig(context.Background(), configPool)
 	if err != nil {
-		log.Printf("Unable to create connection pool: %v\n", err)
+		logger.LogEvent("Unable to create connection pool: " + err.Error())
 		return nil, err
 	}
 
@@ -28,14 +33,14 @@ func InitDB() (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	log.Println("Connected to database")
+	logger.LogEvent("Connected to database")
 	return pool, nil
 }
 
 func CloseDB(pool *pgxpool.Pool) {
 	if pool != nil {
 		pool.Close()
-		log.Println("Database connection pool closed")
+		logger.LogEvent("Database connection pool closed")
 	}
 }
 
@@ -49,10 +54,10 @@ func migrateDB(pool *pgxpool.Pool) error {
 		)
 	`)
 	if err != nil {
-		log.Printf("Error while creating table: %v\n", err)
+		logger.LogEvent("Error while creating table: " + err.Error())
 		return err
 	}
 
-	log.Println("Table created successfully")
+	logger.LogEvent("Table created successfully")
 	return nil
 }
