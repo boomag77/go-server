@@ -26,6 +26,9 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Add global variable for session creation to allow injection in tests
+var newSession = session.NewSession
+
 type SendMessageRequest struct {
 	ChatID int64  `json:"chat_id"`
 	Text   string `json:"text"`
@@ -34,7 +37,7 @@ type SendMessageRequest struct {
 func getBotToken() string {
 	awsRegion := "us-east-2"
 
-	sess, err := session.NewSession(&aws.Config{
+	sess, err := newSession(&aws.Config{
 		Region: aws.String(awsRegion),
 	})
 	if err != nil {
