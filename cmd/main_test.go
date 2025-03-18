@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -92,25 +91,6 @@ func TestWebHookHandler(t *testing.T) {
 	req := httptest.NewRequest("POST", "/webhook", nil)
 	w := httptest.NewRecorder()
 	webHookHandler(w, req)
-	t.Skip("Test not executed")
-}
-
-func TestShutdownServer(t *testing.T) {
-	// Setup a dummy server
-	srv := &http.Server{Addr: ":0"}
-	go func() {
-		srv.ListenAndServe() // dummy serve
-	}()
-	time.Sleep(10 * time.Millisecond)
-	go shutdownServer(srv)
-	t.Skip("Test not executed")
-}
-
-func TestStartServer(t *testing.T) {
-	srv := startServer()
-	if srv == nil {
-		t.Error("Expected server, got nil")
-	}
 	t.Skip("Test not executed")
 }
 

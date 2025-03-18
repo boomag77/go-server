@@ -10,7 +10,7 @@ import (
 )
 
 func TestInitDB(t *testing.T) {
-	// Устанавливаем переменную окружения для тестовой БД
+	// Setting environment variable for test DB
 	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
 	defer os.Unsetenv("DATABASE_URL")
 
@@ -18,11 +18,12 @@ func TestInitDB(t *testing.T) {
 	assert.NoError(t, err, "Expected no error, got an error")
 	assert.NotNil(t, pool, "Expected a valid connection pool, got nil")
 
-	// Закрываем соединение после теста
+	// Closing connection after test
 	CloseDB(pool)
 }
 
 func TestCloseDB(t *testing.T) {
+	// Setting environment variable for test DB
 	os.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/testdb")
 	defer os.Unsetenv("DATABASE_URL")
 
@@ -30,9 +31,9 @@ func TestCloseDB(t *testing.T) {
 	assert.NoError(t, err, "Expected no error, got an error")
 	assert.NotNil(t, pool, "Expected a valid connection pool, got nil")
 
-	// Закрываем соединение
-	// Закрываем соединение
+	// Closing connection
 	CloseDB(pool)
+
 	// Instead of fixed sleep, wait until pool is closed (max 500ms)
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

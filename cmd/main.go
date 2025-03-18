@@ -2,23 +2,17 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 
 	//"log"
 	"net/http"
-	"os"
-	"os/signal"
-
 	// "runtime"
 	// "sync"
-	"syscall"
 	"telegram_server/config"
 	"telegram_server/internal/database"
 	"telegram_server/internal/logger"
-
-	"time"
+	"telegram_server/internal/server"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -85,7 +79,7 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "received"})
 }
 
-// sendin message to BOT_TOKEN
+// sending message to user
 func sendMessage(chatID int64, text string) {
 	botToken := getBotToken()
 	if botToken == "" {
@@ -143,44 +137,43 @@ func webHookHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // shutdown server
-func shutdownServer(server *http.Server) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+// func shutdownServer(server *http.Server) {
+// 	sigChan := make(chan os.Signal, 1)
+// 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	sig := <-sigChan
-	logger.LogEvent("Received signal: " + sig.String())
+// 	sig := <-sigChan
+// 	logger.LogEvent("Received signal: " + sig.String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.LogEvent("Error while shutting down server: " + err.Error())
-	}
+// 	if err := server.Shutdown(ctx); err != nil {
+// 		logger.LogEvent("Error while shutting down server: " + err.Error())
+// 	}
 
-	logger.LogEvent("Server is down!")
-}
+// 	logger.LogEvent("Server is down!")
+// }
 
 // start server
-func startServer() *http.Server {
+// func startServer() *http.Server {
 
-	server := &http.Server{
-		Addr: ":8080",
-	}
+// 	server := &http.Server{
+// 		Addr: ":8080",
+// 	}
 
-	go func() {
+// 	go func() {
 
-		logString := "Starting server on port 8080..."
-		logger.LogEvent(logString)
+// 		logString := "Starting server on port 8080..."
+// 		logger.LogEvent(logString)
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+// 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 
-			logString := "Error while starting server: " + err.Error()
-			logger.LogEvent(logString)
-		}
-	}()
+// 			logger.LogEvent("Error while starting server: " + err.Error())
+// 		}
+// 	}()
 
-	return server
-}
+// 	return server
+// }
 
 func main() {
 	config.Init()
@@ -199,6 +192,10 @@ func main() {
 	http.HandleFunc("/message", messageHandler)
 	http.HandleFunc("/webhook", webHookHandler)
 
-	server := startServer()
-	shutdownServer(server)
+	
+	if err := server.Start(); err != nil {
+		logger.LogEvent("Error while starting server: " + err.Error())
+		return
+	}
+	server.Shutdown()
 }
