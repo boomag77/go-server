@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -9,9 +10,11 @@ import (
 )
 
 var (
-	logChan chan string
-	wg      sync.WaitGroup
-	logFile *os.File
+	logChan     chan string
+	wg          sync.WaitGroup
+	logFile     *os.File
+	mu          sync.Mutex
+	initialized bool
 )
 
 // Logger is a service that logs messages. Implements LogEvent method (in main.go)
@@ -23,16 +26,26 @@ type Logger interface {
 
 // LogEvent logs a message
 func LogEvent(logString string) {
+
 	select {
 	case logChan <- logString:
-
+		// Log message successfully sent to log channel
+		// Do nothing
 	default:
-		log.Println("WARNING: log channel is full, dropping log!")
+		fmt.Println("WARNING: log channel is full, dropping log!")
 	}
 }
 
 // Init initializes the logger
 func Init() {
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if initialized {
+		return
+	}
+
 	var err error
 
 	// Assign to the global variable instead of shadowing it.
@@ -43,13 +56,15 @@ func Init() {
 
 	log.SetOutput(logFile)
 
-	logChan = make(chan string, 100)
+	logChan = make(chan string, 1000)
 
 	numWorkers := runtime.NumCPU()
 	for i := 1; i <= numWorkers; i++ {
 		wg.Add(1)
 		go logWorker()
 	}
+
+	initialized = true
 }
 
 func logWorker() {
@@ -64,9 +79,17 @@ func logWorker() {
 }
 
 func Close() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !initialized {
+		return
+	}
+
 	close(logChan)
 	wg.Wait()
 	if logFile != nil {
 		logFile.Close()
 	}
+	initialized = false
 }

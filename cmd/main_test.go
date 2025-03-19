@@ -98,6 +98,7 @@ func TestMainFunction(t *testing.T) {
 	// Running main may block; we skip actual execution.
 	go main()
 	t.Skip("Test not executed")
+
 }
 
 func TestGetBotToken_SessionError(t *testing.T) {

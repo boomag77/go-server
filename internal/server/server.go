@@ -34,6 +34,7 @@ func Start() error {
 	errChan := make(chan error, 1)
 
 	go func() {
+		logger.LogEvent("Starting server on port " + config.ServerPort)
 		err := server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			errChan <- err
