@@ -9,8 +9,8 @@ import (
 	"sync"
 )
 
-const logsFolderName = "logs"
-const logFileName = "server.log"
+var logsFolderName = "logs"
+var logFileName = "server.log"
 
 var logFilePath string
 
