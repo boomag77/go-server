@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 )
 
@@ -12,14 +11,17 @@ var (
 )
 
 const DatabaseName = "botdb"
-const defaultLogFileName = "server.log"
-var defaultDBURL = fmt.Sprintf("postgres://postgres:postgres@localhost:5432/%s?sslmode=disable", DatabaseName)
+
+const defaultDBURL = "postgres://postgres:postgres@localhost:5432/" + DatabaseName + "?sslmode=disable"
+
 const defaultServerPort = ":8080"
 
-func Init() {
-	LogFileName = getEnv("LOG_FILE_NAME", defaultLogFileName)
+func Init() error {
+
 	DatabaseURL = getEnv("DATABASE_URL", defaultDBURL)
 	ServerPort = getEnv("SERVER_PORT", defaultServerPort)
+
+	return nil
 }
 
 func getEnv(key, defaultValue string) string {

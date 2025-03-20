@@ -4,10 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
-	"telegram_server/config"
 )
+
+const logsFolderName = "logs"
+const logFileName = "server.log"
+
+var logFilePath string
 
 var (
 	logChan     chan string
@@ -19,7 +24,7 @@ var (
 
 // Logger is a service that logs messages. Implements LogEvent method (in main.go)
 type Logger interface {
-	Init()
+	Init() error
 	LogEvent(logString string)
 	Close()
 }
@@ -36,22 +41,47 @@ func LogEvent(logString string) {
 	}
 }
 
+func createLogsDirectory() (dir string, err error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("Unable to get work directory: %w", err)
+	}
+
+	logsDir := filepath.Join(cwd, logsFolderName)
+	info, err := os.Stat(logsDir)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(logsDir, os.ModePerm); err != nil {
+			return "", fmt.Errorf("Failed to create logs directory: %w", err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("Failed to get info about logs directory: %w", err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", logsDir)
+	}
+	return logsDir, nil
+}
+
 // Init initializes the logger
-func Init() {
+func Init() error {
 
 	mu.Lock()
 	defer mu.Unlock()
 
 	if initialized {
-		return
+		return nil
 	}
 
-	var err error
+	// create fileName for OpenFile
+	logsDir, err := createLogsDirectory()
+	if err != nil {
+		return fmt.Errorf("Failed to create logs directory: %w", err)
+	}
+	fileName := filepath.Join(logsDir, logFileName)
 
 	// Assign to the global variable instead of shadowing it.
-	logFile, err = os.OpenFile(config.LogFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err = os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("Failed to open log file %s: %w", fileName, err)
 	}
 
 	log.SetOutput(logFile)
@@ -65,6 +95,8 @@ func Init() {
 	}
 
 	initialized = true
+
+	return nil
 }
 
 func logWorker() {

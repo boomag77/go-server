@@ -5,21 +5,18 @@ import (
 	"strconv"
 	"telegram_server/internal/logger"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func SaveMessage(ctx context.Context, db *pgxpool.Pool, username, text string) error {
-	_, err := db.Exec(ctx, "INSERT INTO messages (username, text) VALUES ($1, $2)", username, text)
+func SaveMessage(ctx context.Context, username, text string) error {
+	_, err := Pool.Exec(ctx, "INSERT INTO messages (username, text) VALUES ($1, $2)", username, text)
 	if err != nil {
-		logger.LogEvent("Error while saving message: " + err.Error())
 		return err
 	}
-	logger.LogEvent("Message saved successfully")
 	return nil
 }
 
-func GetMessages(ctx context.Context, db *pgxpool.Pool) ([]Message, error) {
-	rows, err := db.Query(ctx, "SELECT id, username, text FROM messages")
+func GetMessages(ctx context.Context) ([]Message, error) {
+	rows, err := Pool.Query(ctx, "SELECT id, username, text FROM messages")
 	if err != nil {
 		logger.LogEvent("Error while getting messages: " + err.Error())
 		return nil, err
