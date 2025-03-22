@@ -1,4 +1,4 @@
-package database
+package models
 
 type Message struct {
 	ID       int64

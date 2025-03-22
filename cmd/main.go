@@ -2,42 +2,47 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"telegram_server/config"
-	"telegram_server/internal/database"
+	"telegram_server/internal/app"
 	"telegram_server/internal/logger"
-	"telegram_server/internal/server"
 )
 
+type AppInterface interface {
+	Kill()
+}
+
+type Logger interface {
+	Start() error
+	LogEvent(string)
+	Close()
+}
+
 func main() {
+
+	logger := logger.NewLogger()
+	err := logger.Start("server.log")
+	if err != nil {
+		fmt.Println("Error while starting logger!")
+		os.Exit(1)
+	}
+	logger.LogEvent("Logger initialized successfully")
+	defer logger.Close()
+
 	if err := config.Init(); err != nil {
 		fmt.Println("Error while initialize server configuration!")
 		os.Exit(1)
 	}
 
-	if err := logger.Init(); err != nil {
-		fmt.Println("Error while initialize logging service! " + err.Error())
-		os.Exit(1)
-	} else {
-		logger.LogEvent("Logger initialized successfully")
-		defer logger.Close()
-	}
-
-	err := database.InitDB()
+	a, err := app.NewApp(logger)
 	if err != nil {
-		logger.LogEvent("WARNING!!! ---> Error while initializing database: " + err.Error())
+		logger.LogEvent("Error while creating app: " + err.Error())
 		return
 	}
-	defer database.CloseDB()
+	logger.LogEvent("App started successfully")
+	defer a.Kill()
 
-	http.HandleFunc("/ping", server.PingHandler)
-	http.HandleFunc("/message", server.MessageHandler)
-	http.HandleFunc("/webhook", server.WebHookHandler)
-
-	if err := server.Start(); err != nil {
-		logger.LogEvent("Error while starting server: " + err.Error())
-		return
-	}
-	server.Shutdown()
+	// http.HandleFunc("/ping", a.Router.PingHandler)
+	// http.HandleFunc("/message", a.Router.MessageHandler)
+	// http.HandleFunc("/webhook", a.Bot.WebHookHandler)
 }

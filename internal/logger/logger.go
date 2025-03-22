@@ -9,31 +9,38 @@ import (
 	"sync"
 )
 
-var logsFolderName = "logs"
-var logFileName = "server.log"
-
-var logFilePath string
-
-var (
-	logChan     chan string
-	wg          sync.WaitGroup
-	logFile     *os.File
-	mu          sync.Mutex
-	initialized bool
-)
-
-// Logger is a service that logs messages. Implements LogEvent method (in main.go)
 type Logger interface {
-	Init() error
+	Start(logFileName string) error
 	LogEvent(logString string)
 	Close()
 }
 
+type LoggerImpl struct {
+	running bool
+	logChan chan string
+	wg      sync.WaitGroup
+	logFile *os.File
+	mu      sync.Mutex
+}
+
+// NewLogger creates a new LoggerImpl
+
+func NewLogger() Logger {
+
+	return &LoggerImpl{
+		running: false,
+		logChan: nil,
+		wg:      sync.WaitGroup{},
+		logFile: nil,
+		mu:      sync.Mutex{},
+	}
+}
+
 // LogEvent logs a message
-func LogEvent(logString string) {
+func (l *LoggerImpl) LogEvent(logString string) {
 
 	select {
-	case logChan <- logString:
+	case l.logChan <- logString:
 		// Log message successfully sent to log channel
 		// Do nothing
 	default:
@@ -47,7 +54,7 @@ func createLogsDirectory() (dir string, err error) {
 		return "", fmt.Errorf("Unable to get work directory: %w", err)
 	}
 
-	logsDir := filepath.Join(cwd, logsFolderName)
+	logsDir := filepath.Join(cwd, "logs")
 	info, err := os.Stat(logsDir)
 	if os.IsNotExist(err) {
 		if err := os.Mkdir(logsDir, os.ModePerm); err != nil {
@@ -62,47 +69,45 @@ func createLogsDirectory() (dir string, err error) {
 }
 
 // Init initializes the logger
-func Init() error {
+func (l *LoggerImpl) Start(logFileName string) error {
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	if initialized {
-		return nil
+	if l.running {
+		return fmt.Errorf("Logger already started")
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// create fileName for OpenFile
 	logsDir, err := createLogsDirectory()
 	if err != nil {
-		return fmt.Errorf("Failed to create logs directory: %w", err)
+		return err
 	}
 	fileName := filepath.Join(logsDir, logFileName)
 
 	// Assign to the global variable instead of shadowing it.
-	logFile, err = os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	l.logFile, err = os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("Failed to open log file %s: %w", fileName, err)
+		return err
 	}
 
-	log.SetOutput(logFile)
+	log.SetOutput(l.logFile)
 
-	logChan = make(chan string, 1000)
+	l.logChan = make(chan string, 1000)
 
 	numWorkers := runtime.NumCPU()
 	for i := 1; i <= numWorkers; i++ {
-		wg.Add(1)
-		go logWorker()
+		l.wg.Add(1)
+		go l.logWorker()
 	}
-
-	initialized = true
-
+	l.running = true
 	return nil
 }
 
-func logWorker() {
-	defer wg.Done()
+func (l *LoggerImpl) logWorker() {
+	defer l.wg.Done()
 	for {
-		logString, ok := <-logChan
+		logString, ok := <-l.logChan
 		if !ok {
 			return
 		}
@@ -110,18 +115,13 @@ func logWorker() {
 	}
 }
 
-func Close() {
-	mu.Lock()
-	defer mu.Unlock()
+func (l *LoggerImpl) Close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	if !initialized {
-		return
+	close(l.logChan)
+	l.wg.Wait()
+	if l.logFile != nil {
+		l.logFile.Close()
 	}
-
-	close(logChan)
-	wg.Wait()
-	if logFile != nil {
-		logFile.Close()
-	}
-	initialized = false
 }
