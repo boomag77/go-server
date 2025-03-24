@@ -9,6 +9,11 @@ import (
 	"sync"
 )
 
+type FileSystem interface {
+	CreateDirectory(path string) error
+	OpenFile(name string, flag int, perm os.FileMode) (*os.File, error)
+}
+
 type Logger interface {
 	Start(logFileName string) error
 	LogEvent(logString string)
@@ -16,31 +21,44 @@ type Logger interface {
 }
 
 type LoggerImpl struct {
-	running bool
-	logChan chan string
-	wg      sync.WaitGroup
-	logFile *os.File
-	mu      sync.Mutex
+	logger     *log.Logger
+	bufferSize int
+	running    bool
+	logChan    chan string
+	wg         sync.WaitGroup
+	logFile    *os.File
+	mu         sync.Mutex
 }
 
 // NewLogger creates a new LoggerImpl
 
-func NewLogger() Logger {
+func NewLogger(bufferSize int) Logger {
 
 	return &LoggerImpl{
-		running: false,
-		logChan: nil,
-		wg:      sync.WaitGroup{},
-		logFile: nil,
-		mu:      sync.Mutex{},
+		logger:     nil,
+		bufferSize: bufferSize,
+		running:    false,
+		logChan:    nil,
+		wg:         sync.WaitGroup{},
+		logFile:    nil,
+		mu:         sync.Mutex{},
 	}
 }
 
 // LogEvent logs a message
 func (l *LoggerImpl) LogEvent(logString string) {
+	l.mu.Lock()
+	running := l.running
+	logChan := l.logChan
+	l.mu.Unlock()
+
+	if !running || logChan == nil {
+		fmt.Println("WARNING: logger not started, dropping log!")
+		return
+	}
 
 	select {
-	case l.logChan <- logString:
+	case logChan <- logString:
 		// Log message successfully sent to log channel
 		// Do nothing
 	default:
@@ -71,12 +89,12 @@ func createLogsDirectory() (dir string, err error) {
 // Init initializes the logger
 func (l *LoggerImpl) Start(logFileName string) error {
 
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.running {
 		return fmt.Errorf("Logger already started")
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	// create fileName for OpenFile
 	logsDir, err := createLogsDirectory()
@@ -91,9 +109,9 @@ func (l *LoggerImpl) Start(logFileName string) error {
 		return err
 	}
 
-	log.SetOutput(l.logFile)
+	l.logger = log.New(l.logFile, "", log.LstdFlags)
 
-	l.logChan = make(chan string, 1000)
+	l.logChan = make(chan string, l.bufferSize)
 
 	numWorkers := runtime.NumCPU()
 	for i := 1; i <= numWorkers; i++ {
@@ -111,7 +129,11 @@ func (l *LoggerImpl) logWorker() {
 		if !ok {
 			return
 		}
-		log.Println(logString)
+		l.mu.Lock()
+		if l.logger != nil {
+			l.logger.Println(logString)
+		}
+		l.mu.Unlock()
 	}
 }
 
