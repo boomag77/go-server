@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"telegram_server/config"
 	"telegram_server/internal/app"
 	"telegram_server/internal/bot"
 	"telegram_server/internal/database"
@@ -22,19 +21,21 @@ type App interface {
 }
 
 type Logger interface {
-	Start(logFileName string) error
+	Start() error
 	LogEvent(string)
 	Close()
 }
 
 func main() {
-
-	config.Init()
-
 	ctx := context.Background()
 
-	appLogger := logger.NewLogger(1000)
-	err := appLogger.Start("server.log")
+	loggerConfig := logger.Config{
+		BufferSize:  1000,
+		LogFileName: "server.log",
+	}
+
+	appLogger := logger.NewLogger(loggerConfig)
+	err := appLogger.Start()
 	if err != nil {
 		fmt.Println("Error while starting logger!")
 		os.Exit(1)
@@ -42,18 +43,24 @@ func main() {
 	defer appLogger.Close()
 	appLogger.LogEvent("Logger initialized successfully")
 
-	db, err := database.NewDatabase(appLogger)
+	dbConfig := database.Config{
+		DBName:  "botdb",
+		Logger:  appLogger,
+		WithSSL: false,
+	}
+
+	db, err := database.NewDatabase(dbConfig)
 	if err != nil {
 		appLogger.LogEvent("Failed to connect to database: " + err.Error())
 		os.Exit(1)
 	}
 
-	config := server.Config{
-		Port:   ":8080",
+	srvConfig := server.Config{
+		Port:   "8080",
 		Logger: appLogger,
 	}
 
-	httpSrv, err := server.NewHttpServer(config)
+	httpSrv, err := server.NewHttpServer(srvConfig)
 	if err != nil {
 		appLogger.LogEvent("Failed to start server: " + err.Error())
 		db.CloseDB()

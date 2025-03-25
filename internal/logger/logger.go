@@ -15,7 +15,7 @@ type FileSystem interface {
 }
 
 type Logger interface {
-	Start(logFileName string) error
+	Start() error
 	LogEvent(logString string)
 	Close()
 }
@@ -30,13 +30,22 @@ type LoggerImpl struct {
 	mu         sync.Mutex
 }
 
+type Config struct {
+	LogFileName string
+	BufferSize  int
+}
+
+var logFileName string
+
 // NewLogger creates a new LoggerImpl
 
-func NewLogger(bufferSize int) Logger {
+func NewLogger(cfg Config) Logger {
+
+	logFileName = cfg.LogFileName
 
 	return &LoggerImpl{
 		logger:     nil,
-		bufferSize: bufferSize,
+		bufferSize: cfg.BufferSize,
 		running:    false,
 		logChan:    nil,
 		wg:         sync.WaitGroup{},
@@ -87,7 +96,7 @@ func createLogsDirectory() (dir string, err error) {
 }
 
 // Init initializes the logger
-func (l *LoggerImpl) Start(logFileName string) error {
+func (l *LoggerImpl) Start() error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
