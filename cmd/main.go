@@ -48,7 +48,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpSrv, err := server.NewHttpServer(appLogger)
+	config := server.Config{
+		Port:   ":8080",
+		Logger: appLogger,
+	}
+
+	httpSrv, err := server.NewHttpServer(config)
 	if err != nil {
 		appLogger.LogEvent("Failed to start server: " + err.Error())
 		db.CloseDB()

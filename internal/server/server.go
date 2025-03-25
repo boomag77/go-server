@@ -9,6 +9,13 @@ import (
 
 type Logger interface {
 	LogEvent(string)
+	Close()
+}
+
+type Config struct {
+	Port   string
+	Logger Logger
+	routes map[string]http.HandlerFunc
 }
 
 type HttpServerImpl struct {
@@ -21,14 +28,14 @@ type HttpServer interface {
 	Shutdown(context.Context) error
 }
 
-func NewHttpServer(l Logger) (HttpServer, error) {
+func NewHttpServer(cfg Config) (HttpServer, error) {
 	server := &http.Server{
 		Addr: ":8080",
 	}
 	errChan := make(chan error, 1)
 
 	go func() {
-		l.LogEvent("Starting server on port... " + config.ServerPort)
+		cfg.Logger.LogEvent("Starting server on port... " + config.ServerPort)
 		err := server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			errChan <- err
@@ -38,9 +45,10 @@ func NewHttpServer(l Logger) (HttpServer, error) {
 	case err := <-errChan:
 		return nil, err
 	case <-time.After(100 * time.Millisecond):
+		cfg.Logger.LogEvent("Server is running on port " + cfg.Port)
 		return &HttpServerImpl{
 			srv:    server,
-			logger: l,
+			logger: cfg.Logger,
 		}, nil
 	}
 }
