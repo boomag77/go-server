@@ -124,26 +124,34 @@ func (l *LoggerImpl) Start(logFileName string) error {
 
 func (l *LoggerImpl) logWorker() {
 	defer l.wg.Done()
+
+	l.mu.Lock()
+	logger := l.logger
+	l.mu.Unlock()
+
 	for {
 		logString, ok := <-l.logChan
 		if !ok {
 			return
 		}
-		l.mu.Lock()
-		if l.logger != nil {
-			l.logger.Println(logString)
-		}
-		l.mu.Unlock()
+		logger.Println(logString)
 	}
 }
 
 func (l *LoggerImpl) Close() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	if l.logChan != nil {
+		close(l.logChan)
+	}
+	l.mu.Unlock()
 
-	close(l.logChan)
+	// Ждем завершения воркеров без удержания мьютекса
 	l.wg.Wait()
+
+	// Закрываем файл
+	l.mu.Lock()
 	if l.logFile != nil {
 		l.logFile.Close()
 	}
+	l.mu.Unlock()
 }

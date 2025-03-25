@@ -3,9 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"telegram_server/config"
 	"time"
 )
@@ -21,7 +18,7 @@ type HttpServerImpl struct {
 
 type HttpServer interface {
 	SetHandler(string, http.HandlerFunc)
-	Shutdown()
+	Shutdown(context.Context) error
 }
 
 func NewHttpServer(l Logger) (HttpServer, error) {
@@ -54,19 +51,14 @@ func (h *HttpServerImpl) SetHandler(path string, handler http.HandlerFunc) {
 }
 
 // shutdown server
-func (h *HttpServerImpl) Shutdown() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	sig := <-sigChan
-	h.logger.LogEvent("Received signal: " + sig.String())
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func (h *HttpServerImpl) Shutdown(ctx context.Context) error {
+	h.logger.LogEvent("Shutting down server...")
 
 	if err := h.srv.Shutdown(ctx); err != nil {
 		h.logger.LogEvent("Error while shutting down server: " + err.Error())
+		return err
 	}
 
 	h.logger.LogEvent("Server is down!")
+	return nil
 }

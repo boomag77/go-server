@@ -1,12 +1,10 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
-	"telegram_server/internal/bot"
-	"telegram_server/internal/database"
-	"telegram_server/internal/router"
-	"telegram_server/internal/server"
+	"telegram_server/internal/models"
 )
 
 type Logger interface {
@@ -14,6 +12,8 @@ type Logger interface {
 }
 
 type Database interface {
+	SaveMessage(ctx context.Context, username, text string) error
+	GetMessages(ctx context.Context) ([]models.Message, error)
 	CloseDB()
 }
 
@@ -24,7 +24,7 @@ type Router interface {
 
 type HttpServer interface {
 	SetHandler(string, http.HandlerFunc)
-	Shutdown()
+	Shutdown(ctx context.Context) error
 }
 
 type Bot interface {
@@ -35,46 +35,49 @@ type Bot interface {
 type AppImpl struct {
 	db         Database
 	httpserver HttpServer
+	router     Router
+	bot        Bot
+	logger     Logger
+}
+
+type Config struct {
+	Logger     Logger
+	Database   Database
+	HttpServer HttpServer
 	Router     Router
 	Bot        Bot
 }
 
 type App interface {
-	Kill()
+	Shutdown(ctx context.Context) error
 }
 
-func NewApp(logger Logger) (App, error) {
-	newDatabase, err := database.NewDatabase(logger)
-	if err != nil {
-		return nil, fmt.Errorf("Error while creating database: %w", err)
-	}
-	newRouter, err := router.NewRouter(logger, newDatabase)
-	if err != nil {
-		return nil, fmt.Errorf("Error while creating router: %w", err)
-	}
-
-	newBot, err := bot.NewBot(logger, newDatabase)
-	if err != nil {
-		return nil, fmt.Errorf("Error while creating bot: %w", err)
-	}
-	httpSrv, err := server.NewHttpServer(logger)
-	if err != nil {
-		return nil, fmt.Errorf("Error while starting server: %w", err)
-	}
-
-	httpSrv.SetHandler("/ping", newRouter.PingHandler)
-	httpSrv.SetHandler("/message", newRouter.MessageHandler)
-
+func NewApp(cfg Config) App {
 	return &AppImpl{
-		db:         newDatabase,
-		httpserver: httpSrv,
-		Router:     newRouter,
-		Bot:        newBot,
-	}, nil
+		db:         cfg.Database,
+		httpserver: cfg.HttpServer,
+		router:     cfg.Router,
+		bot:        cfg.Bot,
+		logger:     cfg.Logger,
+	}
 }
 
-func (a *AppImpl) Kill() {
-	a.httpserver.Shutdown()
+func (a *AppImpl) Shutdown(ctx context.Context) error {
+	a.logger.LogEvent("Start shutting down application...")
+
+	var errs []error
+
+	if err := a.httpserver.Shutdown(ctx); err != nil {
+		return err
+	}
+
 	a.db.CloseDB()
+
+	if len(errs) > 0 {
+		return fmt.Errorf("shutdown errors: %v", errs)
+	}
+
+	a.logger.LogEvent("Application shutdown complete")
+	return nil
 
 }
