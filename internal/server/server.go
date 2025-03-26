@@ -3,9 +3,17 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 )
+
+type NetListener interface {
+	Accept() (net.Conn, error)
+	Close() error
+	Addr() net.Addr
+}
 
 type Logger interface {
 	LogEvent(string)
@@ -18,13 +26,18 @@ type Config struct {
 	ReadTimeout    time.Duration
 	WriteTimeout   time.Duration
 	MaxHeaderBytes int
-	Handler        http.Handler
+	MaxBodyBytes   int
+	UseTLS         bool
+	CertFile       string
+	KeyFile        string
 }
 
 type HttpServerImpl struct {
-	srv    *http.Server
-	logger Logger
-	mux    *http.ServeMux
+	srv      *http.Server
+	logger   Logger
+	mux      *http.ServeMux
+	listener NetListener
+	mu       sync.RWMutex
 }
 
 type HttpServer interface {
@@ -41,7 +54,24 @@ func defaultConfig() Config {
 	}
 }
 
+func validateConfig(cfg Config) error {
+	if cfg.Logger == nil {
+		return fmt.Errorf("logger is required")
+	}
+	if cfg.Port == "" {
+		return fmt.Errorf("port is required")
+	}
+	if cfg.UseTLS && (cfg.CertFile == "" || cfg.KeyFile == "") {
+		return fmt.Errorf("cert and key files are required")
+	}
+	return nil
+}
+
 func NewHttpServer(cfg Config) (HttpServer, error) {
+	if err := validateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("Invalid config %w", err)
+	}
+
 	if cfg.Logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
@@ -65,7 +95,7 @@ func NewHttpServer(cfg Config) (HttpServer, error) {
 		mux:    mux,
 	}
 
-	server := &http.Server{
+	impl.srv = &http.Server{
 		Addr:           ":" + cfg.Port,
 		Handler:        mux,
 		ReadTimeout:    cfg.ReadTimeout,
@@ -73,32 +103,37 @@ func NewHttpServer(cfg Config) (HttpServer, error) {
 		MaxHeaderBytes: cfg.MaxHeaderBytes,
 	}
 
-	errChan := make(chan error, 1)
-	started := make(chan struct{})
+	listener, err := net.Listen("tcp", impl.srv.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create listener on port: %s", cfg.Port)
+	}
+	impl.listener = listener
 
 	go func() {
-		cfg.Logger.LogEvent("Starting server on port... " + cfg.Port)
-		close(started)
-		err := server.ListenAndServe()
+		cfg.Logger.LogEvent("Starting server on port...: " + cfg.Port)
+		var err error
+		if cfg.UseTLS {
+			err = impl.srv.ServeTLS(listener, cfg.CertFile, cfg.KeyFile)
+		} else {
+			err = impl.srv.Serve(listener)
+		}
 		if err != nil && err != http.ErrServerClosed {
-			errChan <- err
+			cfg.Logger.LogEvent("Server error: " + err.Error())
 		}
 	}()
-
-	select {
-	case err := <-errChan:
-		return nil, err
-	case <-started:
-		cfg.Logger.LogEvent("Server is running on port " + cfg.Port)
-		return impl, nil
-	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("Error starting server (timeout)")
-	}
+	return impl, nil
 }
 
 // SetHandler sets handler for the server
 func (h *HttpServerImpl) SetHandler(path string, handler http.HandlerFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.logger.LogEvent("Setting handler for path: " + path)
 	h.mux.HandleFunc(path, handler)
+}
+
+func (h *HttpServerImpl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
 }
 
 // shutdown server
