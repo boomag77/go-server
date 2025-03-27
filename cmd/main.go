@@ -27,6 +27,7 @@ type Logger interface {
 }
 
 func main() {
+
 	ctx := context.Background()
 
 	loggerConfig := logger.Config{
@@ -62,7 +63,13 @@ func main() {
 
 	httpSrv, err := server.NewHttpServer(srvConfig)
 	if err != nil {
-		appLogger.LogEvent("Failed to start server: " + err.Error())
+		appLogger.LogEvent("Failed to create the server: " + err.Error())
+		db.CloseDB()
+		os.Exit(1)
+	}
+
+	if err := httpSrv.Start(); err != nil {
+		appLogger.LogEvent("Failed to start the server: " + err.Error())
 		db.CloseDB()
 		os.Exit(1)
 	}
@@ -76,8 +83,8 @@ func main() {
 
 	newBot, err := bot.NewBot(appLogger, db)
 	if err != nil {
-		db.CloseDB()
 		appLogger.LogEvent("Failed to create bot: " + err.Error())
+		newBot = nil
 	}
 
 	httpSrv.SetHandler("/ping", newRouter.PingHandler)

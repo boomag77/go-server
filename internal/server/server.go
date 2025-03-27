@@ -38,9 +38,14 @@ type HttpServerImpl struct {
 	mux      *http.ServeMux
 	listener NetListener
 	mu       sync.RWMutex
+
+	useTLS   bool
+	certFile string
+	keyFile  string
 }
 
 type HttpServer interface {
+	Start() error
 	SetHandler(string, http.HandlerFunc)
 	Shutdown(context.Context) error
 }
@@ -67,6 +72,20 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
+func securityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Базовые заголовки безопасности
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+
+		// Проверка размера тела
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewHttpServer(cfg Config) (HttpServer, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("Invalid config %w", err)
@@ -91,37 +110,48 @@ func NewHttpServer(cfg Config) (HttpServer, error) {
 	mux := http.NewServeMux()
 
 	impl := &HttpServerImpl{
-		logger: cfg.Logger,
-		mux:    mux,
+		logger:   cfg.Logger,
+		mux:      mux,
+		useTLS:   cfg.UseTLS,
+		certFile: cfg.CertFile,
+		keyFile:  cfg.KeyFile,
 	}
 
 	impl.srv = &http.Server{
 		Addr:           ":" + cfg.Port,
-		Handler:        mux,
+		Handler:        securityMiddleware(mux),
 		ReadTimeout:    cfg.ReadTimeout,
 		WriteTimeout:   cfg.WriteTimeout,
 		MaxHeaderBytes: cfg.MaxHeaderBytes,
 	}
 
-	listener, err := net.Listen("tcp", impl.srv.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create listener on port: %s", cfg.Port)
+	return impl, nil
+}
+
+func (h *HttpServerImpl) Start() error {
+	if h.srv == nil {
+		return fmt.Errorf("server is not initialized")
 	}
-	impl.listener = listener
+
+	listener, err := net.Listen("tcp", h.srv.Addr)
+	if err != nil {
+		return fmt.Errorf("Failed to create listener on port: %s", h.srv.Addr)
+	}
+	h.listener = listener
 
 	go func() {
-		cfg.Logger.LogEvent("Starting server on port...: " + cfg.Port)
+		h.logger.LogEvent("Starting server on port...: " + h.srv.Addr)
 		var err error
-		if cfg.UseTLS {
-			err = impl.srv.ServeTLS(listener, cfg.CertFile, cfg.KeyFile)
+		if h.useTLS {
+			err = h.srv.ServeTLS(h.listener, h.certFile, h.keyFile)
 		} else {
-			err = impl.srv.Serve(listener)
+			err = h.srv.Serve(listener)
 		}
 		if err != nil && err != http.ErrServerClosed {
-			cfg.Logger.LogEvent("Server error: " + err.Error())
+			h.logger.LogEvent("Server error: " + err.Error())
 		}
 	}()
-	return impl, nil
+	return nil
 }
 
 // SetHandler sets handler for the server
