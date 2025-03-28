@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -15,19 +16,20 @@ type FileSystem interface {
 }
 
 type Logger interface {
-	Start() error
+	Start(ctx context.Context) error
 	LogEvent(logString string)
 	Close()
 }
 
 type LoggerImpl struct {
-	logger     *log.Logger
-	bufferSize int
-	running    bool
-	logChan    chan string
-	wg         sync.WaitGroup
-	logFile    *os.File
-	mu         sync.Mutex
+	logger      *log.Logger
+	logFileName string
+	bufferSize  int
+	running     bool
+	logChan     chan string
+	wg          sync.WaitGroup
+	logFile     *os.File
+	mu          sync.Mutex
 }
 
 type Config struct {
@@ -35,22 +37,17 @@ type Config struct {
 	BufferSize  int
 }
 
-var logFileName string
-
-// NewLogger creates a new LoggerImpl
-
 func NewLogger(cfg Config) Logger {
 
-	logFileName = cfg.LogFileName
-
 	return &LoggerImpl{
-		logger:     nil,
-		bufferSize: cfg.BufferSize,
-		running:    false,
-		logChan:    nil,
-		wg:         sync.WaitGroup{},
-		logFile:    nil,
-		mu:         sync.Mutex{},
+		logger:      nil,
+		logFileName: cfg.LogFileName,
+		bufferSize:  cfg.BufferSize,
+		running:     false,
+		logChan:     nil,
+		wg:          sync.WaitGroup{},
+		logFile:     nil,
+		mu:          sync.Mutex{},
 	}
 }
 
@@ -96,7 +93,7 @@ func createLogsDirectory() (dir string, err error) {
 }
 
 // Init initializes the logger
-func (l *LoggerImpl) Start() error {
+func (l *LoggerImpl) Start(ctx context.Context) error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -110,7 +107,7 @@ func (l *LoggerImpl) Start() error {
 	if err != nil {
 		return err
 	}
-	fileName := filepath.Join(logsDir, logFileName)
+	fileName := filepath.Join(logsDir, l.logFileName)
 
 	// Assign to the global variable instead of shadowing it.
 	l.logFile, err = os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -125,30 +122,36 @@ func (l *LoggerImpl) Start() error {
 	numWorkers := runtime.NumCPU()
 	for i := 1; i <= numWorkers; i++ {
 		l.wg.Add(1)
-		go l.logWorker()
+		go l.logWorker(ctx)
 	}
 	l.running = true
 	return nil
 }
 
-func (l *LoggerImpl) logWorker() {
+func (l *LoggerImpl) logWorker(ctx context.Context) {
 	defer l.wg.Done()
 
-	l.mu.Lock()
-	logger := l.logger
-	l.mu.Unlock()
-
 	for {
-		logString, ok := <-l.logChan
-		if !ok {
+		select {
+		case logString, ok := <-l.logChan:
+			if !ok {
+				return // channel closed
+			}
+			l.logger.Println(logString)
+		case <-ctx.Done():
+			l.logger.Println("Logger stopped.")
 			return
 		}
-		logger.Println(logString)
+
 	}
 }
 
 func (l *LoggerImpl) Close() {
 	l.mu.Lock()
+	if !l.running {
+		l.mu.Unlock()
+		return
+	}
 	if l.logChan != nil {
 		close(l.logChan)
 	}

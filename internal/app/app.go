@@ -14,6 +14,7 @@ type Logger interface {
 type Database interface {
 	SaveMessage(ctx context.Context, username, text string) error
 	GetMessages(ctx context.Context) ([]models.Message, error)
+	Ping() error
 	CloseDB()
 }
 

@@ -10,6 +10,7 @@ import (
 	"telegram_server/internal/bot"
 	"telegram_server/internal/database"
 	"telegram_server/internal/logger"
+	"telegram_server/internal/models"
 	"telegram_server/internal/router"
 	"telegram_server/internal/server"
 	"time"
@@ -26,6 +27,13 @@ type Logger interface {
 	Close()
 }
 
+type Database interface {
+	Connect() error
+	SaveMessage(ctx context.Context, username, text string) error
+	GetMessages(ctx context.Context) ([]models.Message, error)
+	CloseDB()
+}
+
 func main() {
 
 	ctx := context.Background()
@@ -34,9 +42,10 @@ func main() {
 		BufferSize:  1000,
 		LogFileName: "server.log",
 	}
-
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	appLogger := logger.NewLogger(loggerConfig)
-	err := appLogger.Start()
+	err := appLogger.Start(ctx)
 	if err != nil {
 		fmt.Println("Error while starting logger!")
 		os.Exit(1)
@@ -51,6 +60,12 @@ func main() {
 	}
 
 	db, err := database.NewDatabase(dbConfig)
+	if err != nil {
+		appLogger.LogEvent("Failed to connect to database: " + err.Error())
+		os.Exit(1)
+	}
+
+	err = db.Connect(context.Background())
 	if err != nil {
 		appLogger.LogEvent("Failed to connect to database: " + err.Error())
 		os.Exit(1)
