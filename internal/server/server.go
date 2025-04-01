@@ -17,7 +17,6 @@ type NetListener interface {
 
 type Logger interface {
 	LogEvent(string)
-	Close()
 }
 
 type Config struct {

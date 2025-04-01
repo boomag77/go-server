@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,10 +22,12 @@ type App interface {
 	Shutdown(ctx context.Context) error
 }
 
+type FileSystem interface{}
+
 type Logger interface {
-	Start() error
+	Start(ctx context.Context) error
 	LogEvent(string)
-	Close()
+	Close(ctx context.Context) error
 }
 
 type Database interface {
@@ -42,16 +45,17 @@ func main() {
 		BufferSize:  1000,
 		LogFileName: "server.log",
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	appLogger := logger.NewLogger(loggerConfig)
+
+	fileSystem := logger.OSFileSystem{}
+
+	appLogger := logger.NewLogger(loggerConfig, fileSystem)
 	err := appLogger.Start(ctx)
 	if err != nil {
 		fmt.Println("Error while starting logger!")
 		os.Exit(1)
 	}
-	defer appLogger.Close()
-	appLogger.LogEvent("Logger initialized successfully")
 
 	dbConfig := database.Config{
 		DBName:  "botdb",
@@ -136,4 +140,10 @@ func main() {
 
 	<-done
 	appLogger.LogEvent("Application's shutted down successfully")
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := appLogger.Close(ctx); err != nil {
+		log.Println("ERROR: failed to close logger cleanly:", err)
+	}
 }
