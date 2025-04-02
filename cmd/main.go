@@ -66,12 +66,14 @@ func main() {
 	db, err := database.NewDatabase(dbConfig)
 	if err != nil {
 		appLogger.LogEvent("Failed to connect to database: " + err.Error())
+		fmt.Println("Error while getting new database!" + err.Error())
 		os.Exit(1)
 	}
 
 	err = db.Connect(context.Background())
 	if err != nil {
 		appLogger.LogEvent("Failed to connect to database: " + err.Error())
+		fmt.Println("Error while connecting to database!")
 		os.Exit(1)
 	}
 
@@ -83,12 +85,14 @@ func main() {
 	httpSrv, err := server.NewHttpServer(srvConfig)
 	if err != nil {
 		appLogger.LogEvent("Failed to create the server: " + err.Error())
+		fmt.Println("Error while creating new http server!")
 		db.CloseDB()
 		os.Exit(1)
 	}
 
 	if err := httpSrv.Start(); err != nil {
 		appLogger.LogEvent("Failed to start the server: " + err.Error())
+		fmt.Println("Error while starting http server!")
 		db.CloseDB()
 		os.Exit(1)
 	}
@@ -97,6 +101,7 @@ func main() {
 	if err != nil {
 		db.CloseDB()
 		appLogger.LogEvent("Failed to create router: " + err.Error())
+		fmt.Println("Error while creating new router!")
 		os.Exit(1)
 	}
 
@@ -111,7 +116,7 @@ func main() {
 
 	cfg := app.Config{
 		Logger:     appLogger,
-		Database:   db,
+		Database:   nil,
 		HttpServer: httpSrv,
 		Router:     newRouter,
 		Bot:        newBot,

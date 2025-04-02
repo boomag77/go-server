@@ -137,6 +137,7 @@ func (l *LoggerImpl) createLogsDirectory() (string, error) {
 
 // Init initializes the logger
 func (l *LoggerImpl) Start(ctx context.Context) error {
+	fmt.Println("LoggerImpl Start")
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -156,6 +157,7 @@ func (l *LoggerImpl) Start(ctx context.Context) error {
 	// Assign to the global variable instead of shadowing it.
 	l.logFile, err = l.fs.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Println("LOGGER OPEN FILE ERROR:", err)
 		return err
 	}
 
@@ -169,6 +171,7 @@ func (l *LoggerImpl) Start(ctx context.Context) error {
 		go l.logWorker(ctx)
 	}
 	l.running = true
+	fmt.Println("Logger started")
 	return nil
 }
 

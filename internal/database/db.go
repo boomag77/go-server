@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"os"
 	"telegram_server/internal/models"
 	"time"
 
@@ -67,22 +68,42 @@ func defaultConfig() Config {
 func applyDefaultsIfNotSet(cfg Config) Config {
 	def := defaultConfig()
 	if cfg.DBName == "" {
-		cfg.DBName = def.DBName
+		if dbName := os.Getenv("DB_NAME"); dbName != "" {
+			cfg.DBName = dbName
+		} else {
+			cfg.DBName = def.DBName
+		}
 	}
 	if cfg.Host == "" {
-		cfg.Host = def.Host
+		if host := os.Getenv("DB_HOST"); host != "" {
+			cfg.Host = host
+		} else {
+			cfg.Host = def.Host
+		}
 	}
 	if cfg.Port == 0 {
-		cfg.Port = def.Port
+		if port := os.Getenv("DB_PORT"); port != "" {
+			fmt.Sscanf(port, "%d", &cfg.Port)
+		} else {
+			cfg.Port = def.Port
+		}
 	}
 	if cfg.User == "" {
-		cfg.User = def.User
+		if user := os.Getenv("DB_USER"); user != "" {
+			cfg.User = user
+		} else {
+			cfg.User = def.User
+		}
 	}
 	if cfg.AllowAutocreate == nil {
 		cfg.AllowAutocreate = def.AllowAutocreate
 	}
 	if cfg.Password == "" {
-		cfg.Password = def.Password
+		if password := os.Getenv("DB_PASSWORD"); password != "" {
+			cfg.Password = password
+		} else {
+			cfg.Password = def.Password
+		}
 	}
 	if cfg.MaxConns == 0 {
 		cfg.MaxConns = def.MaxConns
@@ -101,15 +122,15 @@ func NewDatabase(cfg Config) (Database, error) {
 
 	cfg = applyDefaultsIfNotSet(cfg)
 
-	url := createURL(cfg)
+	url := createURL(cfg, "user")
 
-	exists, err := isExists(cfg.DBName, cfg.Logger)
+	exists, err := isExists(cfg)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		if *cfg.AllowAutocreate {
-			err := createDB(cfg.DBName, cfg.Logger)
+			err := createDB(cfg)
 			if err != nil {
 				return nil, err
 			}
@@ -150,10 +171,21 @@ func (d *DatabaseImpl) Connect(ctx context.Context) error {
 	}
 
 	d.logger.LogEvent("Connected to database")
+	_, err = d.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS messages (
+		id SERIAL PRIMARY KEY,
+		username TEXT NOT NULL,
+		text TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		d.logger.LogEvent("Error while creating table: " + err.Error())
+		return err
+	}
 	return nil
 }
 
-func createURL(config Config) string {
+func createURL(config Config, accessType string) string {
+	dbName := map[string]string{"admin": "postgres", "user": config.DBName}[accessType]
 	sslMode := map[bool]string{true: "enable", false: "disable"}[config.WithSSL]
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
@@ -161,14 +193,15 @@ func createURL(config Config) string {
 		config.Password,
 		config.Host,
 		config.Port,
-		config.DBName,
+		dbName,
 		sslMode,
 	)
 }
 
 // connect to system database
-func connectAdmin() (*pgxpool.Pool, error) {
-	const adminConnStr string = "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+func connectAdmin(config Config) (*pgxpool.Pool, error) {
+	adminConnStr := createURL(config, "admin")
+	fmt.Println("Connecting to admin database -> " + adminConnStr)
 	adminPool, err := pgxpool.New(context.Background(), adminConnStr)
 	if err != nil {
 		return nil, fmt.Errorf("Error while getting adminPool at system Database.")
@@ -177,9 +210,9 @@ func connectAdmin() (*pgxpool.Pool, error) {
 }
 
 // check if database exists
-func isExists(dbName string, logger Logger) (bool, error) {
+func isExists(config Config) (bool, error) {
 
-	adminPool, err := connectAdmin()
+	adminPool, err := connectAdmin(config)
 	if err != nil {
 		return false, err
 	}
@@ -187,29 +220,29 @@ func isExists(dbName string, logger Logger) (bool, error) {
 
 	var exists bool
 	err = adminPool.QueryRow(context.Background(),
-		"SELECT EXISTS(SELECT datname FROM pg_catalog.pg_database WHERE datname = $1)", dbName).Scan(&exists)
+		"SELECT EXISTS(SELECT datname FROM pg_catalog.pg_database WHERE datname = $1)", config.DBName).Scan(&exists)
 	if err != nil {
-		logger.LogEvent("Error while checking if database " + dbName + "exists. ")
+		config.Logger.LogEvent("Error while checking if database " + config.DBName + "exists. ")
 		return false, err
 	}
 	return exists, nil
 }
 
 // create table if it does not exist
-func createDB(newDBName string, logger Logger) error {
+func createDB(config Config) error {
 
-	adminPool, err := connectAdmin()
+	adminPool, err := connectAdmin(config)
 	if err != nil {
 		return err
 	}
 	defer adminPool.Close()
 
-	_, err = adminPool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %s", newDBName))
+	_, err = adminPool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %s", config.DBName))
 	if err != nil {
-		logger.LogEvent("Error while creating database: " + newDBName + ".")
+		config.Logger.LogEvent("Error while creating database: " + config.DBName + ".")
 		return err
 	}
-	logger.LogEvent("Database " + newDBName + " created successfully")
+	config.Logger.LogEvent("Database " + config.DBName + " created successfully")
 	return nil
 }
 
