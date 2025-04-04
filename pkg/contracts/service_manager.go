@@ -9,7 +9,7 @@ type ServiceManager interface {
 	ShutdownAllServices(ctx context.Context) error
 	StartService(ctx context.Context, name string) error
 	ShutdownService(ctx context.Context, name string) error
-	GetServiceStatus(name string) (string, error)
+	GetServiceStatus(name string) (string, bool)
 	GetServiceCount(ctx context.Context) int
 }
 
