@@ -11,35 +11,16 @@ import (
 	"telegram_server/internal/bot"
 	"telegram_server/internal/database"
 	"telegram_server/internal/logger"
-	"telegram_server/internal/models"
-	"telegram_server/internal/router"
 	"telegram_server/internal/server"
+	"telegram_server/pkg/contracts"
 	"time"
 )
-
-type App interface {
-	Start() error
-	Shutdown(ctx context.Context) error
-}
-
-type FileSystem interface{}
-
-type Logger interface {
-	Start(ctx context.Context) error
-	LogEvent(string)
-	Close(ctx context.Context) error
-}
-
-type Database interface {
-	Connect() error
-	SaveMessage(ctx context.Context, username, text string) error
-	GetMessages(ctx context.Context) ([]models.Message, error)
-	CloseDB()
-}
 
 func main() {
 
 	ctx := context.Background()
+
+	sm, err := contracts.NewServiceManager()
 
 	loggerConfig := logger.Config{
 		BufferSize:  1000,
@@ -50,7 +31,8 @@ func main() {
 
 	fileSystem := logger.OSFileSystem{}
 
-	appLogger := logger.NewLogger(loggerConfig, fileSystem)
+	logger := logger.NewLogger(loggerConfig, fileSystem)
+
 	err := appLogger.Start(ctx)
 	if err != nil {
 		fmt.Println("Error while starting logger!")

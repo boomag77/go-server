@@ -4,28 +4,22 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"telegram_server/internal/models"
+	"telegram_server/pkg/contracts"
+	"telegram_server/pkg/models"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Logger interface {
-	LogEvent(string)
-}
+type Logger = contracts.Logger
+type Database = contracts.Database
+type Message = models.Message
+type LogMessage = contracts.LogMessage
 
 type DatabaseImpl struct {
 	configPool *pgxpool.Config
 	pool       *pgxpool.Pool
 	logger     Logger
-}
-
-type Database interface {
-	Connect(ctx context.Context) error
-	SaveMessage(ctx context.Context, username, text string) error
-	GetMessages(ctx context.Context) ([]models.Message, error)
-	Ping() error
-	CloseDB()
 }
 
 type Config struct {
@@ -117,7 +111,7 @@ func applyDefaultsIfNotSet(cfg Config) Config {
 func NewDatabase(cfg Config) (Database, error) {
 
 	if cfg.Logger == nil {
-		return nil, fmt.Errorf("Logger is required. Cannot create database.")
+		return nil, fmt.Errorf("logger is required. Cannot create database")
 	}
 
 	cfg = applyDefaultsIfNotSet(cfg)
@@ -135,14 +129,13 @@ func NewDatabase(cfg Config) (Database, error) {
 				return nil, err
 			}
 		} else {
-			return nil, fmt.Errorf("Database does not exist and autocreate is disabled.")
+			return nil, fmt.Errorf("database does not exist and autocreate is disabled")
 		}
 	}
 
 	configPool, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		cfg.Logger.LogEvent("Unable to parse database URL")
-		return nil, err
+		return nil, fmt.Errorf("unable to parse database URL: %w", err)
 	}
 
 	configPool.MaxConns = int32(cfg.MaxConns)
@@ -157,7 +150,7 @@ func NewDatabase(cfg Config) (Database, error) {
 
 func (d *DatabaseImpl) Ping() error {
 	if d.pool == nil {
-		return fmt.Errorf("No database connection.")
+		return fmt.Errorf("no database connection")
 	}
 	return d.pool.Ping(context.Background())
 }
@@ -166,11 +159,15 @@ func (d *DatabaseImpl) Connect(ctx context.Context) error {
 	var err error
 	d.pool, err = pgxpool.NewWithConfig(ctx, d.configPool)
 	if err != nil {
-		d.logger.LogEvent("Unable to connect to database.")
-		return err
+		return fmt.Errorf("unable to connect to database: %w", err)
 	}
 
-	d.logger.LogEvent("Connected to database")
+	d.logger.LogEvent(LogMessage{
+		Level:   models.LevelInfo,
+		Service: contracts.DatabaseName,
+		Message: "Connected to database",
+		Err:     nil,
+	})
 	_, err = d.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS messages (
 		id SERIAL PRIMARY KEY,
 		username TEXT NOT NULL,
@@ -178,8 +175,7 @@ func (d *DatabaseImpl) Connect(ctx context.Context) error {
 		)
 	`)
 	if err != nil {
-		d.logger.LogEvent("Error while creating table: " + err.Error())
-		return err
+		return fmt.Errorf("error while creating non-existing table: %w", err)
 	}
 	return nil
 }
@@ -204,7 +200,7 @@ func connectAdmin(config Config) (*pgxpool.Pool, error) {
 	fmt.Println("Connecting to admin database -> " + adminConnStr)
 	adminPool, err := pgxpool.New(context.Background(), adminConnStr)
 	if err != nil {
-		return nil, fmt.Errorf("Error while getting adminPool at system Database.")
+		return nil, fmt.Errorf("error while getting adminPool at system Database")
 	}
 	return adminPool, nil
 }
@@ -222,8 +218,7 @@ func isExists(config Config) (bool, error) {
 	err = adminPool.QueryRow(context.Background(),
 		"SELECT EXISTS(SELECT datname FROM pg_catalog.pg_database WHERE datname = $1)", config.DBName).Scan(&exists)
 	if err != nil {
-		config.Logger.LogEvent("Error while checking if database " + config.DBName + "exists. ")
-		return false, err
+		return false, fmt.Errorf("error while checking if database %s exists: %w", config.DBName, err)
 	}
 	return exists, nil
 }
@@ -239,16 +234,25 @@ func createDB(config Config) error {
 
 	_, err = adminPool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %s", config.DBName))
 	if err != nil {
-		config.Logger.LogEvent("Error while creating database: " + config.DBName + ".")
-		return err
+		return fmt.Errorf("error while creating database: %w", err)
 	}
-	config.Logger.LogEvent("Database " + config.DBName + " created successfully")
+	config.Logger.LogEvent(LogMessage{
+		Level:   models.LevelInfo,
+		Service: contracts.DatabaseName,
+		Message: "Database " + config.DBName + " created successfully",
+		Err:     nil,
+	})
 	return nil
 }
 
-func (d *DatabaseImpl) CloseDB() {
+func (d *DatabaseImpl) Disconnect() {
 	if d.pool != nil {
 		d.pool.Close()
-		d.logger.LogEvent("Database connection pool closed")
+		d.logger.LogEvent(LogMessage{
+			Level:   models.LevelInfo,
+			Service: contracts.DatabaseName,
+			Message: "Database connection pool closed, disconnected succesfully",
+			Err:     nil,
+		})
 	}
 }

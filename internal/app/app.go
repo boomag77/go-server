@@ -8,7 +8,7 @@ import (
 )
 
 type Logger interface {
-	LogEvent(string)
+	LogEvent(prefix string, err error)
 }
 
 type Database interface {
@@ -26,11 +26,6 @@ type Router interface {
 type HttpServer interface {
 	SetHandler(string, http.HandlerFunc)
 	Shutdown(ctx context.Context) error
-}
-
-type Bot interface {
-	SendMessage(chatID int64, text string) error
-	WebHookHandler(w http.ResponseWriter, r *http.Request)
 }
 
 type AppImpl struct {
@@ -64,7 +59,7 @@ func NewApp(cfg Config) App {
 }
 
 func (a *AppImpl) Shutdown(ctx context.Context) error {
-	a.logger.LogEvent("Start shutting down application...")
+	a.logger.LogEvent("Start shutting down application...", nil)
 
 	var errs []error
 
@@ -78,7 +73,7 @@ func (a *AppImpl) Shutdown(ctx context.Context) error {
 		return fmt.Errorf("shutdown errors: %v", errs)
 	}
 
-	a.logger.LogEvent("Application shutdown complete")
+	a.logger.LogEvent("Application shutdown complete", nil)
 	return nil
 
 }

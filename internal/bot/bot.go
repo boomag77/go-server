@@ -6,32 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	//"telegram_server/internal/awsclient"
-	"telegram_server/internal/models"
+	"telegram_server/pkg/contracts"
+	"telegram_server/pkg/models"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // Bot is a service that interacts with Telegram bot
+type Bot = contracts.Bot
+type Logger = contracts.Logger
+type Database = contracts.Database
+type LogMessage = contracts.LogMessage
+type Message = models.Message
 
 type BotImpl struct {
 	logger   Logger
 	database Database
-}
-
-type Bot interface {
-	SendMessage(chatID int64, text string) error
-	WebHookHandler(w http.ResponseWriter, r *http.Request)
-}
-
-type Logger interface {
-	LogEvent(string)
-}
-
-type Database interface {
-	SaveMessage(ctx context.Context, username, text string) error
-	GetMessages(ctx context.Context) ([]models.Message, error)
 }
 
 type AWSClient interface {
@@ -43,7 +36,7 @@ type SendMessageRequest struct {
 	Text   string `json:"text"`
 }
 
-var botToken string
+var url string
 
 // NewBot creates a new Bot
 func NewBot(l Logger, db Database) (Bot, error) {
@@ -55,7 +48,8 @@ func NewBot(l Logger, db Database) (Bot, error) {
 	// if err != nil {
 	// 	return nil, err
 	// }
-	botToken = "tkn"
+	botToken := "tkn"
+	url = "https://api.telegram.org/bot" + botToken + "/sendMessage"
 	return &BotImpl{
 		logger:   l,
 		database: db,
@@ -64,25 +58,27 @@ func NewBot(l Logger, db Database) (Bot, error) {
 
 func (b *BotImpl) SendMessage(chatID int64, text string) error {
 
-	url := "https://api.telegram.org/bot" + botToken + "/sendMessage"
 	data := SendMessageRequest{
 		ChatID: chatID,
 		Text:   text,
 	}
 	body, err := json.Marshal(data)
 	if err != nil {
-		b.logger.LogEvent("Error while marshaling JSON: " + err.Error())
-		return err
+		return fmt.Errorf("error while marshaling JSON: %w", err)
 	}
 
 	response, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
-		b.logger.LogEvent("Error while sending response message: " + err.Error())
-		return err
+		return fmt.Errorf("error while sending response message: %w", err)
 	}
 	defer response.Body.Close()
 
-	b.logger.LogEvent("Message sent! " + response.Status + " " + fmt.Sprint(response.StatusCode))
+	b.logger.LogEvent(LogMessage{
+		Level:   models.LevelInfo,
+		Service: contracts.BotName,
+		Message: "Message sent! " + response.Status + " " + fmt.Sprint(response.StatusCode),
+		Err:     nil,
+	})
 	return nil
 }
 
@@ -93,8 +89,12 @@ func (b *BotImpl) WebHookHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 
-		logString := "Error while decoding webhook update: " + err.Error()
-		b.logger.LogEvent(logString)
+		b.logger.LogEvent(LogMessage{
+			Level:   models.LevelError,
+			Service: contracts.BotName,
+			Message: "Error while decoding webhook update",
+			Err:     err,
+		})
 		http.Error(w, "Error while decoding", http.StatusBadRequest)
 		return
 	}
@@ -102,21 +102,55 @@ func (b *BotImpl) WebHookHandler(w http.ResponseWriter, r *http.Request) {
 		userName := update.Message.From.UserName
 		messageText := update.Message.Text
 
-		logString := "Received message from: " + userName + ", text: " + messageText
-		b.logger.LogEvent(logString)
+		var builder strings.Builder
+		builder.WriteString("Received message from: ")
+		builder.WriteString(userName)
+		builder.WriteString(", text: ")
+		builder.WriteString(messageText)
+
+		b.logger.LogEvent(LogMessage{
+			Level:   models.LevelInfo,
+			Service: contracts.BotName,
+			Message: builder.String(),
+			Err:     nil,
+		})
 
 		// Saving message to database
 		if err := b.database.SaveMessage(context.Background(), userName, messageText); err != nil {
-			b.logger.LogEvent("Error while saving message to database: " + err.Error())
+			b.logger.LogEvent(LogMessage{
+				Level:   models.LevelError,
+				Service: contracts.DatabaseName,
+				Message: "Error while saving received message to database",
+				Err:     err,
+			})
 		} else {
-			b.logger.LogEvent("Message saved successfully")
+			b.logger.LogEvent(LogMessage{
+				Level:   models.LevelInfo,
+				Service: contracts.DatabaseName,
+				Message: "Received message has been saved successfully",
+				Err:     nil,
+			})
 		}
 
 		// TO DELETE
 		fmt.Println(b.database.GetMessages(context.Background()))
 
 		responseText := "Hi, " + userName + "! You wrote: " + messageText
-		b.SendMessage(update.Message.Chat.ID, responseText)
+		if err := b.SendMessage(update.Message.Chat.ID, responseText); err != nil {
+			b.logger.LogEvent(LogMessage{
+				Level:   models.LevelError,
+				Service: contracts.BotName,
+				Message: "Error while sending message to user " + userName,
+				Err:     err,
+			})
+		} else {
+			b.logger.LogEvent(LogMessage{
+				Level:   models.LevelInfo,
+				Service: contracts.BotName,
+				Message: "Message to user " + userName + " sent successfully",
+				Err:     nil,
+			})
+		}
 
 	}
 

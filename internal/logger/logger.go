@@ -8,13 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"telegram_server/pkg/contracts"
 )
 
-type FileSystem interface {
-	MkDirAll(path string, perm os.FileMode) error
-	OpenFile(name string, flag int, perm os.FileMode) (*os.File, error)
-	Executable() (string, error)
-}
+type FileSystem = contracts.FileSystem
 
 type OSFileSystem struct{}
 
@@ -28,12 +25,6 @@ func (OSFileSystem) OpenFile(name string, flag int, perm os.FileMode) (*os.File,
 
 func (OSFileSystem) Executable() (string, error) {
 	return os.Executable()
-}
-
-type Logger interface {
-	Start(ctx context.Context) error
-	LogEvent(logString string)
-	Close(ctx context.Context) error
 }
 
 type LoggerImpl struct {
@@ -63,7 +54,7 @@ func defaultConfig() Config {
 	}
 }
 
-func NewLogger(cfg Config, fs FileSystem) Logger {
+func NewLogger(cfg Config, fs FileSystem) contracts.Logger {
 
 	defCfg := defaultConfig()
 	if cfg.LogFileName == "" {
@@ -90,8 +81,7 @@ func NewLogger(cfg Config, fs FileSystem) Logger {
 	}
 }
 
-// LogEvent logs a message
-func (l *LoggerImpl) LogEvent(logString string) {
+func (l *LoggerImpl) LogEvent(ctx context.Context, msg contracts.LogMessage) {
 	l.mu.Lock()
 	running := l.running
 	logChan := l.logChan
@@ -103,7 +93,7 @@ func (l *LoggerImpl) LogEvent(logString string) {
 	}
 
 	select {
-	case logChan <- logString:
+	case logChan <- msg.Formatted():
 		// Log message successfully sent to log channel
 		// Do nothing
 	default:
@@ -137,13 +127,12 @@ func (l *LoggerImpl) createLogsDirectory() (string, error) {
 
 // Init initializes the logger
 func (l *LoggerImpl) Start(ctx context.Context) error {
-	fmt.Println("LoggerImpl Start")
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.running {
-		return fmt.Errorf("Logger already started")
+		return fmt.Errorf("logger already started")
 	}
 
 	// create fileName for OpenFile
@@ -157,7 +146,6 @@ func (l *LoggerImpl) Start(ctx context.Context) error {
 	// Assign to the global variable instead of shadowing it.
 	l.logFile, err = l.fs.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println("LOGGER OPEN FILE ERROR:", err)
 		return err
 	}
 
@@ -171,7 +159,6 @@ func (l *LoggerImpl) Start(ctx context.Context) error {
 		go l.logWorker(ctx)
 	}
 	l.running = true
-	fmt.Println("Logger started")
 	return nil
 }
 
@@ -193,7 +180,7 @@ func (l *LoggerImpl) logWorker(ctx context.Context) {
 	}
 }
 
-func (l *LoggerImpl) Close(ctx context.Context) error {
+func (l *LoggerImpl) Shutdown(ctx context.Context) error {
 	l.mu.Lock()
 	if !l.running {
 		l.mu.Unlock()
@@ -220,6 +207,6 @@ func (l *LoggerImpl) Close(ctx context.Context) error {
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("Logger close timeout or context canceled.")
+		return fmt.Errorf("logger close timeout or context canceled")
 	}
 }
