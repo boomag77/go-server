@@ -1,16 +1,20 @@
 package contracts
 
-import "context"
+import (
+	"context"
+	"telegram_server/pkg/models"
+)
+
+type ServiceStatus = models.ServiceStatus
 
 type ServiceManager interface {
 	RegisterService(name string, service Service) error
 	UnregisterService(name string) error
 	StartAllServices(ctx context.Context)
-	ShutdownAllServices(ctx context.Context) error
+	StopAllServices(ctx context.Context) error
 	StartService(ctx context.Context, name string) error
-	ShutdownService(ctx context.Context, name string) error
-	GetServiceStatus(name string) (string, bool)
-	GetServiceCount(ctx context.Context) int
+	StopService(ctx context.Context, name string) error
+	GetServiceStatus(name string) ServiceStatus // RLock is used here
 }
 
 // ServiceManager is an interface that defines methods for managing services.
