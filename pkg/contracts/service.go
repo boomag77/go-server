@@ -15,5 +15,7 @@ const (
 
 type Service interface {
 	Start(ctx context.Context) error
+	IsHealthy() bool
 	Shutdown(ctx context.Context) error
+	ForceKill()
 }

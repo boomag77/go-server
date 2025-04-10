@@ -16,18 +16,85 @@ type LogLevel = models.LogLevel
 type ServiceManager = contracts.ServiceManager
 type ServiceStatus = models.ServiceStatus
 
+type Config struct {
+	Logger                   Logger
+	StartServiceAttemptCount int
+	StopServiceAttemptCount  int
+	StartServiceTimeout      time.Duration
+	StopServiceTimeout       time.Duration
+}
+
 type ServiceManagerImpl struct {
+	config   Config
 	services map[string]Service
 	statuses map[string]models.ServiceStatus
-	logger   Logger
 	mu       sync.RWMutex
 }
 
-func NewServiceManager(logger contracts.Logger) ServiceManager {
+func (sm *ServiceManagerImpl) Watch(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			sm.log(models.LevelInfo,
+				"Service manager watch stopped",
+				nil)
+			return
+
+		case <-ticker.C:
+			services := sm.snapshotServices()
+			for name, service := range services {
+				if service.IsHealthy() {
+					sm.log(models.LevelInfo,
+						"Service "+name+" is healthy",
+						nil)
+				} else {
+					sm.log(models.LevelWarning,
+						"Service "+name+" is unhealthy",
+						nil)
+					if err := sm.RestartService(ctx, name); err != nil {
+						sm.log(models.LevelError,
+							"Failed to restart service "+name,
+							err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func NewServiceManager(cfg Config) ServiceManager {
+	var defaultConfig = defaultConfig()
+
+	if cfg.Logger == nil {
+		panic("logger is required for ServiceManager")
+	}
+	if cfg.StartServiceAttemptCount <= 0 {
+		cfg.StartServiceAttemptCount = defaultConfig.StartServiceAttemptCount
+	}
+	if cfg.StopServiceAttemptCount <= 0 {
+		cfg.StopServiceAttemptCount = defaultConfig.StopServiceAttemptCount
+	}
+	if cfg.StartServiceTimeout <= 0 {
+		cfg.StartServiceTimeout = defaultConfig.StartServiceTimeout
+	}
+	if cfg.StopServiceTimeout <= 0 {
+		cfg.StopServiceTimeout = defaultConfig.StopServiceTimeout
+	}
 	return &ServiceManagerImpl{
+		config:   cfg,
 		services: make(map[string]contracts.Service),
 		statuses: make(map[string]models.ServiceStatus),
-		logger:   logger,
+	}
+}
+
+func defaultConfig() Config {
+	return Config{
+		StartServiceAttemptCount: 3,
+		StopServiceAttemptCount:  3,
+		StartServiceTimeout:      5 * time.Second,
+		StopServiceTimeout:       5 * time.Second,
 	}
 }
 
@@ -43,56 +110,42 @@ func (sm *ServiceManagerImpl) RegisterService(name string, service contracts.Ser
 	sm.statuses[name] = models.ServiceStatusStopped
 	sm.mu.Unlock()
 
-	sm.logger.LogEvent(
-		context.Background(),
-		LogMessage{
-			Level:   models.LevelInfo,
-			Service: "ServiceManager",
-			Message: "Service " + name + " registered",
-			Err:     nil,
-		})
+	sm.log(models.LevelInfo,
+		"Service "+name+" registered successfully",
+		nil)
 	return nil
 }
 
 func (sm *ServiceManagerImpl) UnregisterService(name string) error {
-	sm.mu.Lock()
 
-	service, registered := sm.services[name]
-	if !registered {
-		sm.mu.Unlock()
+	serviceStatus := sm.GetServiceStatus(name)
+
+	if serviceStatus == models.ServiceStatusNotRegistered {
 		return fmt.Errorf("service %s not registered", name)
 	}
-	if sm.statuses[name] == models.ServiceStatusRunning {
-		err := service.Shutdown(context.Background())
+
+	if serviceStatus == models.ServiceStatusRunning {
+		err := sm.StopService(context.Background(), name)
 		if err != nil {
-			sm.mu.Unlock()
-			return fmt.Errorf("failed to shutdown service %s: %w", name, err)
+			return fmt.Errorf("failed to stop service %s before unregistering: %w", name, err)
 		}
-		sm.logger.LogEvent(
-			context.Background(),
-			LogMessage{
-				Level:   models.LevelInfo,
-				Service: "ServiceManager",
-				Message: "Service " + name + " stopped before unregistering",
-				Err:     nil,
-			})
+		sm.log(models.LevelInfo,
+			"Service "+name+" stopped before unregistering",
+			nil)
 	}
+	sm.mu.Lock()
 	delete(sm.services, name)
+	delete(sm.statuses, name)
 	sm.mu.Unlock()
 
-	sm.logger.LogEvent(
-		context.Background(),
-		LogMessage{
-			Level:   models.LevelInfo,
-			Service: "ServiceManager",
-			Message: "Service " + name + " unregistered",
-			Err:     nil,
-		})
+	sm.log(models.LevelInfo,
+		"Service "+name+" unregistered successfully",
+		nil)
 	return nil
 }
 
 func (sm *ServiceManagerImpl) log(level LogLevel, message string, err error) {
-	sm.logger.LogEvent(
+	sm.config.Logger.LogEvent(
 		context.Background(),
 		LogMessage{
 			Level:   level,
@@ -102,64 +155,48 @@ func (sm *ServiceManagerImpl) log(level LogLevel, message string, err error) {
 		})
 }
 
-func (sm *ServiceManagerImpl) snapshotServices() map[string]Service {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	snapshot := make(map[string]Service, len(sm.services))
-	for name, service := range sm.services {
-		snapshot[name] = service
-	}
-	return snapshot
-}
-
-func (sm *ServiceManagerImpl) setServiceStatus(name string, status ServiceStatus) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	sm.statuses[name] = status
-}
-
-func (sm *ServiceManagerImpl) isReadyToStart(name string) bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	_, registered := sm.services[name]
-	if !registered {
-		return false
-	}
-	if sm.statuses[name] == models.ServiceStatusRunning {
-		return false
-	}
-	if sm.statuses[name] == models.ServiceStatusStarting {
-		return false
-	}
-	if sm.statuses[name] == models.ServiceStatusStopping {
-		return false
-	}
-	return true
-}
-
 func (sm *ServiceManagerImpl) StartService(ctx context.Context, name string) error {
+	var service Service
+	var err error
 
-	if !sm.isReadyToStart(name) {
-		return fmt.Errorf("service %s not registered or already starting/stopping", name)
+	switch sm.GetServiceStatus(name) {
+	case models.ServiceStatusRunning:
+		return fmt.Errorf("service %s already running", name)
+	case models.ServiceStatusStopped:
+		sm.mu.RLock()
+		service = sm.services[name]
+		sm.mu.RUnlock()
+	case models.ServiceStatusStarting:
+		return fmt.Errorf("service %s is starting", name)
+	case models.ServiceStatusStopping:
+		return fmt.Errorf("service %s is stopping", name)
+	default:
+		return fmt.Errorf("service %s not registered", name)
 	}
-	service := sm.services[name]
+
 	sm.setServiceStatus(name, models.ServiceStatusStarting)
-
-	err := service.Start(ctx)
-	if err != nil {
-		sm.setServiceStatus(name, models.ServiceStatusStopped)
-		return err
+	for i := 0; i < sm.config.StartServiceAttemptCount; i++ {
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, sm.config.StartServiceTimeout)
+		err = service.Start(ctxWithTimeout)
+		cancel()
+		if err == nil {
+			sm.log(models.LevelInfo,
+				"Service "+name+" started successfully",
+				nil)
+			sm.setServiceStatus(name, models.ServiceStatusRunning)
+			return nil
+		}
+		sm.log(models.LevelWarning,
+			"Start attempt "+fmt.Sprintf("%d", i+1)+" for service "+name+" failed",
+			err,
+		)
 	}
-
-	sm.setServiceStatus(name, models.ServiceStatusRunning)
-	sm.log(models.LevelInfo,
-		"Service "+name+" started successfully",
-		nil)
-
+	sm.setServiceStatus(name, models.ServiceStatusStopped)
+	sm.log(models.LevelWarning,
+		"Service "+name+" failed to start after 3 attempts",
+		err,
+	)
 	return nil
-
 }
 
 func (sm *ServiceManagerImpl) StartAllServices(ctx context.Context) {
@@ -172,31 +209,24 @@ func (sm *ServiceManagerImpl) StartAllServices(ctx context.Context) {
 	for name := range services {
 
 		name := name
-		//service := service
 
 		wg.Add(1)
 
 		go func(name string) {
 			defer wg.Done()
 
-			ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-
-			if err := sm.StartService(ctxWithTimeout, name); err != nil {
+			if err := sm.StartService(ctx, name); err != nil {
 
 				notStartedMutex.Lock()
 				notStarted = append(notStarted, name)
 				notStartedMutex.Unlock()
 
 				sm.log(models.LevelError,
-					"Service "+name+" failed to start: "+err.Error(),
+					"Service "+name+" failed to start",
 					err)
 
 				return
 			}
-			sm.log(models.LevelInfo,
-				"Service "+name+" started successfully",
-				nil)
 		}(name)
 
 	}
@@ -225,7 +255,10 @@ func (sm *ServiceManagerImpl) StopService(ctx context.Context, name string) erro
 		service = sm.services[name]
 		sm.mu.RUnlock()
 	case models.ServiceStatusStopped:
-		return fmt.Errorf("service %s already stopped", name)
+		sm.log(models.LevelWarning,
+			"Trying to stop the service "+name+", but it is already stopped",
+			nil)
+		return nil
 	case models.ServiceStatusStarting:
 		return fmt.Errorf("service %s is starting", name)
 	case models.ServiceStatusStopping:
@@ -235,20 +268,36 @@ func (sm *ServiceManagerImpl) StopService(ctx context.Context, name string) erro
 	}
 
 	sm.setServiceStatus(name, models.ServiceStatusStopping)
-	for i := 0; i < 3; i++ {
-		err = service.Shutdown(ctx)
+
+	done := make(chan error, 1)
+
+	go func() {
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, sm.config.StopServiceTimeout)
+		done <- service.Shutdown(ctxWithTimeout)
+		cancel()
+	}()
+	
+	select {
+	case err = <-done:
 		if err == nil {
+			sm.log(models.LevelInfo,
+				"Service "+name+" stopped successfully",
+				nil)
 			sm.setServiceStatus(name, models.ServiceStatusStopped)
 			return nil
 		}
+	case <-ctx.Done():
 		sm.log(models.LevelWarning,
-			"Shutdown attempt "+fmt.Sprintf("%d", i+1)+" for service "+name+" failed: ",
-			err,
-		)
-
+			"Service "+name+" shutdown timed out",
+			nil)
+		service.ForceKill()
+		sm.log(models.LevelWarning,
+			"Service "+name+" force killed",
+			nil)
+		sm.setServiceStatus(name, models.ServiceStatusStopped)
+		return nil
 	}
-	sm.setServiceStatus(name, models.ServiceStatusRunning)
-	return fmt.Errorf("failed to stop service %s: %w", name, err)
+	return nil
 
 }
 func (sm *ServiceManagerImpl) StopAllServices(ctx context.Context) error {
@@ -263,10 +312,8 @@ func (sm *ServiceManagerImpl) StopAllServices(ctx context.Context) error {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			ctxWithTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
 
-			err := sm.StopService(ctxWithTimeout, name)
+			err := sm.StopService(ctx, name)
 
 			if err != nil {
 				notStoppedMutex.Lock()
@@ -274,14 +321,11 @@ func (sm *ServiceManagerImpl) StopAllServices(ctx context.Context) error {
 				notStoppedMutex.Unlock()
 
 				sm.log(models.LevelError,
-					"Service "+name+" failed to stop: ",
+					"Service "+name+" failed to stop",
 					err)
 
 				return
 			}
-			sm.log(models.LevelInfo,
-				"Service "+name+" stopped successfully",
-				nil)
 		}(name)
 
 	}
@@ -317,4 +361,43 @@ func (sm *ServiceManagerImpl) GetServiceStatus(name string) ServiceStatus {
 	default:
 		return models.ServiceStatusNotRegistered
 	}
+}
+
+func (sm *ServiceManagerImpl) RestartService(ctx context.Context, name string) error {
+
+	if err := sm.StopService(ctx, name); err != nil {
+		sm.log(models.LevelError,
+			"Failed to stop service "+name+" while restarting",
+			err)
+		return err
+	}
+
+	if err := sm.StartService(ctx, name); err != nil {
+		sm.log(models.LevelError,
+			"Failed to start service "+name+" while restarting",
+			err)
+		return err
+	}
+
+	sm.log(models.LevelInfo,
+		"Service "+name+" restarted successfully",
+		nil)
+	return nil
+}
+
+func (sm *ServiceManagerImpl) snapshotServices() map[string]Service {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	snapshot := make(map[string]Service, len(sm.services))
+	for name, service := range sm.services {
+		snapshot[name] = service
+	}
+	return snapshot
+}
+
+func (sm *ServiceManagerImpl) setServiceStatus(name string, status ServiceStatus) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.statuses[name] = status
 }

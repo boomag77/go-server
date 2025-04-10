@@ -15,6 +15,7 @@ type ServiceManager interface {
 	StartService(ctx context.Context, name string) error
 	StopService(ctx context.Context, name string) error
 	GetServiceStatus(name string) ServiceStatus // RLock is used here
+	RestartService(ctx context.Context, name string) error
 }
 
 // ServiceManager is an interface that defines methods for managing services.

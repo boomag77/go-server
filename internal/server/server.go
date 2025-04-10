@@ -15,6 +15,7 @@ type Logger = contracts.Logger
 type LogMessage = contracts.LogMessage
 type NetListener = contracts.NetListener
 type HttpServer = contracts.HttpServer
+type LogLevel = models.LogLevel
 
 type Config struct {
 	Logger         Logger
@@ -29,7 +30,7 @@ type Config struct {
 }
 
 type HttpServerImpl struct {
-	logger   Logger
+	config   Config
 	listener NetListener
 	mu       sync.RWMutex
 	certFile string
@@ -37,6 +38,17 @@ type HttpServerImpl struct {
 	srv      *http.Server
 	mux      *http.ServeMux
 	useTLS   bool
+}
+
+func (h *HttpServerImpl) log(level LogLevel, message string, err error) {
+	h.config.Logger.LogEvent(
+		context.Background(),
+		LogMessage{
+			Level:   level,
+			Service: contracts.HTTPServerName,
+			Message: message,
+			Err:     err,
+		})
 }
 
 func defaultConfig() Config {
@@ -99,7 +111,7 @@ func NewHttpServer(cfg Config) (HttpServer, error) {
 	mux := http.NewServeMux()
 
 	impl := &HttpServerImpl{
-		logger:   cfg.Logger,
+		config:   cfg,
 		mux:      mux,
 		useTLS:   cfg.UseTLS,
 		certFile: cfg.CertFile,
@@ -117,6 +129,10 @@ func NewHttpServer(cfg Config) (HttpServer, error) {
 	return impl, nil
 }
 
+func (h *HttpServerImpl) IsHealthy() bool {
+	return true
+}
+
 func (h *HttpServerImpl) Start(ctx context.Context) error {
 	if h.srv == nil {
 		return fmt.Errorf("server is not initialized")
@@ -129,12 +145,7 @@ func (h *HttpServerImpl) Start(ctx context.Context) error {
 	h.listener = listener
 
 	go func() {
-		h.logger.LogEvent(LogMessage{
-			Level:   models.LevelInfo,
-			Service: contracts.HTTPServerName,
-			Message: "Starting server on port: " + h.srv.Addr,
-			Err:     nil,
-		})
+		h.log(models.LevelInfo, "Starting server on port: "+h.srv.Addr, nil)
 		var err error
 		if h.useTLS {
 			err = h.srv.ServeTLS(h.listener, h.certFile, h.keyFile)
@@ -142,12 +153,8 @@ func (h *HttpServerImpl) Start(ctx context.Context) error {
 			err = h.srv.Serve(listener)
 		}
 		if err != nil && err != http.ErrServerClosed {
-			h.logger.LogEvent(LogMessage{
-				Level:   models.LevelError,
-				Service: contracts.HTTPServerName,
-				Message: "Error starting server",
-				Err:     err,
-			})
+			h.log(models.LevelError, "Error starting server", err)
+
 		}
 	}()
 
@@ -157,19 +164,10 @@ func (h *HttpServerImpl) Start(ctx context.Context) error {
 		defer cancel()
 		err := h.srv.Shutdown(shutdownCtx)
 		if err != nil {
-			h.logger.LogEvent(LogMessage{
-				Level:   models.LevelError,
-				Service: contracts.HTTPServerName,
-				Message: "Error shutting down server",
-				Err:     err,
-			})
+			h.log(models.LevelError, "Error shutting down server", err)
 		} else {
-			h.logger.LogEvent(LogMessage{
-				Level:   models.LevelInfo,
-				Service: contracts.HTTPServerName,
-				Message: "Server shutdown complete",
-				Err:     nil,
-			})
+			h.log(models.LevelInfo, "Server shutdown complete", nil)
+
 		}
 	}()
 
@@ -180,13 +178,10 @@ func (h *HttpServerImpl) Start(ctx context.Context) error {
 func (h *HttpServerImpl) SetHandler(path string, handler http.HandlerFunc) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.logger.LogEvent(LogMessage{
-		Level:   models.LevelInfo,
-		Service: contracts.HTTPServerName,
-		Message: "Setting handler for path: " + path,
-		Err:     nil,
-	})
+
+	h.log(models.LevelInfo, "Setting handler for path: "+path, nil)
 	h.mux.HandleFunc(path, handler)
+	h.log(models.LevelInfo, "Handler set for path: "+path, nil)
 }
 
 func (h *HttpServerImpl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -195,28 +190,32 @@ func (h *HttpServerImpl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // shutdown server
 func (h *HttpServerImpl) Shutdown(ctx context.Context) error {
-	h.logger.LogEvent(LogMessage{
-		Level:   models.LevelInfo,
-		Service: contracts.HTTPServerName,
-		Message: "Shutting down server...",
-		Err:     nil,
-	})
 
-	if err := h.srv.Shutdown(ctx); err != nil {
-		h.logger.LogEvent(LogMessage{
-			Level:   models.LevelError,
-			Service: contracts.HTTPServerName,
-			Message: "Error while shutting down server",
-			Err:     err,
-		})
-		return err
+	if h.srv == nil {
+		h.log(models.LevelWarning, "Trying to shutdown server, but Server is not initialized", nil)
+		return nil
 	}
 
-	h.logger.LogEvent(LogMessage{
-		Level:   models.LevelInfo,
-		Service: contracts.HTTPServerName,
-		Message: "Server is down!",
-		Err:     nil,
-	})
+	h.log(models.LevelInfo, "Starting shutting down server", nil)
+
+	err := h.srv.Shutdown(ctx)
+	if err != nil {
+		h.log(models.LevelError, "Error shutting down server", err)
+		return err
+	}
+	h.log(models.LevelInfo, "Server shutdown complete", nil)
+
 	return nil
+
+}
+
+func (h *HttpServerImpl) ForceKill() {
+	// Force kill the server
+	if h.listener != nil {
+		h.listener.Close()
+		h.listener = nil
+		h.log(models.LevelInfo, "Listener closed", nil)
+	}
+	h.srv.Close()
+	h.log(models.LevelInfo, "Server force killed", nil)
 }
